@@ -1,0 +1,7 @@
+Run migrations from the Backend directory.
+
+Install migration tooling with:
+pip install -r requirements-migrations.txt
+
+Create or update the database schema with:
+alembic upgrade head
