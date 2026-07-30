@@ -18,11 +18,9 @@ export class ApiError extends Error {
   }
 }
 
-let tokenGetter: (() => string | null) | null = null;
 let unauthorizedHandler: (() => void) | null = null;
 
-export function configureApi(getToken: () => string | null, onUnauthorized?: () => void) {
-  tokenGetter = getToken;
+export function configureApi(onUnauthorized?: () => void) {
   unauthorizedHandler = onUnauthorized ?? null;
 }
 
@@ -38,12 +36,10 @@ async function parseResponse(response: Response) {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = tokenGetter?.();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !headers.has("Content-Type") && !(init.body instanceof URLSearchParams)) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: "include" });
   const payload = await parseResponse(response);
   if (!response.ok) {
     const detail = payload && typeof payload === "object" && "detail" in payload ? (payload as { detail: unknown }).detail : payload;

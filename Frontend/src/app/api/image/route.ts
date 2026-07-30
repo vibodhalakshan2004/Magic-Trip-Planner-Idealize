@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
+const WIKIMEDIA_SEARCH_URL = "https://commons.wikimedia.org/w/api.php";
 const ALLOWED_HOSTS = new Set([
   "upload.wikimedia.org",
   "maps.googleapis.com",
@@ -11,42 +12,47 @@ const ALLOWED_HOSTS = new Set([
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const rawUrl = searchParams.get("url");
+  const query = searchParams.get("query")?.trim();
+  const label = searchParams.get("label")?.trim() || "Image unavailable";
 
-  if (!rawUrl) {
-    return placeholder("Image unavailable");
+  let url: URL | null = null;
+
+  if (rawUrl) {
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return placeholder(label);
+    }
+  } else if (query) {
+    url = await findWikimediaImage(query);
+  } else {
+    return placeholder(label);
   }
 
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return placeholder("Image unavailable");
-  }
-
-  if (!isAllowedImageUrl(url)) {
-    return placeholder("Image unavailable");
+  if (!url || !isAllowedImageUrl(url)) {
+    return placeholder(label);
   }
 
   try {
     const upstream = await fetchImage(url);
 
     if (!upstream?.ok || !upstream.body) {
-      return placeholder("Image unavailable");
+      return placeholder(label);
     }
 
     const contentType = upstream.headers.get("content-type") ?? "image/jpeg";
     if (!contentType.startsWith("image/")) {
-      return placeholder("Image unavailable");
+      return placeholder(label);
     }
 
     const declaredLength = Number(upstream.headers.get("content-length") ?? 0);
     if (declaredLength > MAX_IMAGE_BYTES) {
-      return placeholder("Image unavailable");
+      return placeholder(label);
     }
 
     const image = await readWithLimit(upstream.body, MAX_IMAGE_BYTES);
     if (!image) {
-      return placeholder("Image unavailable");
+      return placeholder(label);
     }
 
     return new Response(image, {
@@ -58,8 +64,61 @@ export async function GET(request: Request) {
       },
     });
   } catch {
-    return placeholder("Image unavailable");
+    return placeholder(label);
   }
+}
+
+async function findWikimediaImage(query: string) {
+  try {
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      origin: "*",
+      generator: "search",
+      gsrsearch: query,
+      gsrnamespace: "6",
+      gsrlimit: "3",
+      prop: "imageinfo",
+      iiprop: "url|mime",
+      iiurlwidth: "1200",
+    });
+    const response = await fetch(`${WIKIMEDIA_SEARCH_URL}?${params}`, {
+      headers: { "User-Agent": "MagicTripPlanner/1.0 image lookup" },
+      signal: AbortSignal.timeout(5_000),
+      next: { revalidate: 60 * 60 * 12 },
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json() as {
+      query?: { pages?: Record<string, { title?: string; imageinfo?: Array<{ mime?: string; thumburl?: string; url?: string }> }> };
+    };
+    const pages = Object.values(payload.query?.pages ?? {});
+
+    for (const page of pages) {
+      if (!isRelevantResult(query, page.title ?? "")) continue;
+      const info = page.imageinfo?.[0];
+      if (!info?.mime?.startsWith("image/")) continue;
+      const source = info.thumburl || info.url;
+      if (!source) continue;
+      const imageUrl = new URL(source);
+      if (isAllowedImageUrl(imageUrl)) return imageUrl;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isRelevantResult(query: string, title: string) {
+  const stopWords = new Set(["file", "hotel", "resort", "guest", "house", "accommodation", "sri", "lanka", "jpg", "jpeg", "png", "webp"]);
+  const tokens = (value: string) => new Set(
+    value.toLowerCase().match(/[a-z0-9]+/g)?.filter((token) => token.length > 2 && !stopWords.has(token)) ?? [],
+  );
+  const queryTokens = tokens(query);
+  const titleTokens = tokens(title);
+  return queryTokens.size > 0 && [...queryTokens].some((token) => titleTokens.has(token));
 }
 
 function isAllowedImageUrl(url: URL) {

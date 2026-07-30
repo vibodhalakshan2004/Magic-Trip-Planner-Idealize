@@ -1,32 +1,40 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { configureApi } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { usePlannerStore } from "@/lib/store/planner-store";
+import * as authApi from "@/lib/api/auth";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const logout = useAuthStore((state) => state.logout);
+  const setSession = useAuthStore((state) => state.setSession);
+  const setHydrated = useAuthStore((state) => state.setHydrated);
   const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } }));
   const apiConfig = useMemo(
     () => ({
-      getToken: () => useAuthStore.getState().token,
       onUnauthorized: () => {
         logout();
         usePlannerStore.getState().reset();
         queryClient.clear();
-        router.replace("/login");
+        if (pathname !== "/login" && pathname !== "/register") router.replace("/login");
       },
     }),
-    [logout, queryClient, router],
+    [logout, pathname, queryClient, router],
   );
 
   useEffect(() => {
-    configureApi(apiConfig.getToken, apiConfig.onUnauthorized);
-  }, [apiConfig]);
+    configureApi(apiConfig.onUnauthorized);
+    let active = true;
+    authApi.me()
+      .then((user) => { if (active) setSession(user); })
+      .catch(() => { if (active) setHydrated(true); });
+    return () => { active = false; };
+  }, [apiConfig, setHydrated, setSession]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

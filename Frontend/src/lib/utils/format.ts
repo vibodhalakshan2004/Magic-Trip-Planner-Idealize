@@ -40,6 +40,17 @@ export function dateTime(value?: string | null) {
 
 export function fallbackImage(label: string, kind: "place" | "hotel" | "empty" = "place") {
   const colors = kind === "hotel" ? ["#0f766e", "#f8fafc"] : kind === "empty" ? ["#334155", "#f8fafc"] : ["#1d4ed8", "#f8fafc"];
-  const text = encodeURIComponent(label || "MagicTripPlanner");
-  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"><defs><pattern id="p" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M0 40H80M40 0V80" stroke="${colors[1]}" stroke-opacity=".18" stroke-width="2"/></pattern></defs><rect width="800" height="520" fill="${colors[0]}"/><rect width="800" height="520" fill="url(#p)"/><path d="M120 360C220 240 300 310 390 210s190-60 290 80v160H120z" fill="${colors[1]}" opacity=".22"/><circle cx="610" cy="120" r="46" fill="${colors[1]}" opacity=".3"/><text x="56" y="88" fill="${colors[1]}" font-family="Arial" font-size="42" font-weight="700">${text}</text></svg>`)}`;
+  const text = escapeSvgText(label || "MagicTripPlanner");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"><defs><pattern id="p" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M0 40H80M40 0V80" stroke="${colors[1]}" stroke-opacity=".18" stroke-width="2"/></pattern></defs><rect width="800" height="520" fill="${colors[0]}"/><rect width="800" height="520" fill="url(#p)"/><path d="M120 360C220 240 300 310 390 210s190-60 290 80v160H120z" fill="${colors[1]}" opacity=".22"/><circle cx="610" cy="120" r="46" fill="${colors[1]}" opacity=".3"/><text x="56" y="88" fill="${colors[1]}" font-family="Arial" font-size="42" font-weight="700">${text}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeSvgText(value: string) {
+  return value.replace(/[<>&'\"]/g, (character) => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "'": "&apos;",
+    "\"": "&quot;",
+  })[character] ?? character);
 }

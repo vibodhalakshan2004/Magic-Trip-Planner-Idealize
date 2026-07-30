@@ -1,27 +1,23 @@
-from uuid import UUID
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.budget_agent import BudgetAgent
-
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-
-from app.models.user import User
-from app.models.trip import Trip
-from app.models.selected_place import SelectedPlace
-from app.models.selected_hotel import SelectedHotel
 from app.models.budget_estimate import BudgetEstimate
 from app.models.route_plan import RoutePlan
-
+from app.models.selected_hotel import SelectedHotel
+from app.models.selected_place import SelectedPlace
+from app.models.user import User
 from app.schemas.budget import (
-    BudgetCalculateRequest,
     BudgetAgentResponse,
+    BudgetCalculateRequest,
     SavedBudgetEstimateResponse,
 )
-
+from app.services.trip_access import require_trip_access
 
 router = APIRouter(
     prefix="/budget",
@@ -39,20 +35,7 @@ def calculate_budget_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     selected_places = (
         db.query(SelectedPlace)
@@ -159,20 +142,7 @@ def get_latest_budget_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id)
 
     budget_estimate = (
         db.query(BudgetEstimate)

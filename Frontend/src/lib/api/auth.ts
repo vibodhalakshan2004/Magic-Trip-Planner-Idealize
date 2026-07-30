@@ -15,5 +15,5 @@ export async function login(email: string, password: string) {
   });
 }
 
-export const me = (token?: string) =>
-  token ? request<User>("/auth/me", { headers: { Authorization: `Bearer ${token}` } }) : request<User>("/auth/me");
+export const me = () => request<User>("/auth/me");
+export const logout = () => request<{ message: string }>("/auth/logout", { method: "POST" });

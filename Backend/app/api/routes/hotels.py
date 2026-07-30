@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import datetime
 from uuid import UUID
@@ -6,37 +7,32 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.hotel_agent import HotelAgent
-
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-
-from app.models.user import User
-from app.models.trip import Trip
 from app.models.preference import Preference
-from app.models.selected_place import SelectedPlace
-from app.models.selected_hotel import SelectedHotel
 from app.models.route_plan import RoutePlan
-
+from app.models.selected_hotel import SelectedHotel
+from app.models.selected_place import SelectedPlace
+from app.models.trip import Trip
+from app.models.user import User
 from app.schemas.hotel import (
     DailyHotelSelectRequest,
     DailyHotelSelectResponse,
-    DailyHotelSuggestRequest,
     DailyHotelSuggestionResponse,
+    DailyHotelSuggestRequest,
     HotelAgentResponse,
     HotelSearchResponse,
     HotelSuggestRequest,
+    SelectedHotelResponse,
     SelectHotelsRequest,
     SelectHotelsResponse,
-    SelectedHotelResponse,
 )
 from app.schemas.preference import PreferenceResponse
-
 from app.services.geocoder import GeocoderService
 from app.services.hotel_search import HotelSearchService
 from app.services.media_lookup import MediaLookupService
-from app.services.osrm_router import OSRMRouterService
 from app.services.transport_cost import estimate_segment_transport_cost
-
+from app.services.trip_access import require_trip_access
 
 router = APIRouter(
     prefix="/hotels",
@@ -45,7 +41,6 @@ router = APIRouter(
 
 geocoder_service = GeocoderService()
 media_lookup_service = MediaLookupService()
-router_service = OSRMRouterService()
 
 
 def _saved_preference_prompt(preference: Preference) -> dict:
@@ -167,23 +162,23 @@ def _add_transfer_fields(hotel: dict, origin: dict, trip: Trip) -> dict:
             "transfer_cost_lkr": 0,
         }
 
-    destination = {
-        "name": hotel.get("name") or "Hotel",
-        "latitude": float(hotel["latitude"]),
-        "longitude": float(hotel["longitude"]),
-    }
-
-    try:
-        route = router_service.route_between(
-            origin=origin,
-            destination=destination,
-            transport_type=trip.transport_type,
-        )
-        distance = route["distance_km"]
-        duration = route["duration_minutes"]
-    except Exception:
-        distance = 0
-        duration = 0
+    straight_line_distance = _haversine_distance_km(
+        float(origin["latitude"]),
+        float(origin["longitude"]),
+        float(hotel["latitude"]),
+        float(hotel["longitude"]),
+    )
+    distance = round(straight_line_distance * 1.25, 1)
+    speed_kmh = {
+        "walking": 4.5,
+        "bike": 14,
+        "bus": 25,
+        "train": 35,
+        "car": 35,
+        "taxi": 35,
+        "mixed": 30,
+    }.get(trip.transport_type, 30)
+    duration = round(max(distance / speed_kmh * 60, 5), 0) if distance else 0
 
     transfer_cost = estimate_segment_transport_cost(
         transport_type=trip.transport_type,
@@ -196,8 +191,28 @@ def _add_transfer_fields(hotel: dict, origin: dict, trip: Trip) -> dict:
         "transfer_distance_km": distance,
         "transfer_time_minutes": duration,
         "transfer_cost_lkr": transfer_cost,
-        "distance_summary": hotel.get("distance_summary") or f"{distance} km from the day route endpoint.",
+        "distance_summary": hotel.get("distance_summary") or f"About {distance} km from the day route endpoint.",
     }
+
+
+def _haversine_distance_km(
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+) -> float:
+    earth_radius_km = 6371.0
+    latitude_delta = math.radians(destination_latitude - origin_latitude)
+    longitude_delta = math.radians(destination_longitude - origin_longitude)
+    origin_latitude_radians = math.radians(origin_latitude)
+    destination_latitude_radians = math.radians(destination_latitude)
+    haversine = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.cos(origin_latitude_radians)
+        * math.cos(destination_latitude_radians)
+        * math.sin(longitude_delta / 2) ** 2
+    )
+    return earth_radius_km * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
 
 
 @router.post(
@@ -210,20 +225,7 @@ def suggest_hotels_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     selected_places = (
         db.query(SelectedPlace)
@@ -295,20 +297,7 @@ def search_hotels_for_trip(
             "suggestions": [],
         }
 
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     try:
         service = HotelSearchService()
@@ -343,20 +332,7 @@ def select_hotels_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     db.query(SelectedHotel).filter(
         SelectedHotel.trip_id == trip.id
@@ -476,20 +452,7 @@ def get_selected_hotels_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id)
 
     return (
         db.query(SelectedHotel)
@@ -510,14 +473,7 @@ def suggest_hotels_for_route_day(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(Trip.id == trip_id, Trip.user_id == current_user.id)
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     route_plan = _latest_confirmed_route(db, trip)
 
@@ -532,34 +488,35 @@ def suggest_hotels_for_route_day(
 
     service = HotelSearchService()
     raw_suggestions = service.search_hotels(
-        query=f"{query} near {origin['name']}",
+        query=query,
         destination=f"{origin['name']}, {trip.destination}",
         country="Sri Lanka",
         limit=request.max_results,
+        latitude=float(origin["latitude"]),
+        longitude=float(origin["longitude"]),
+        radius_km=request.radius_km,
     )
-
-    if not raw_suggestions:
-        raw_suggestions = service.search_hotels(
-            query=query,
-            destination=trip.destination,
-            country="Sri Lanka",
-            limit=request.max_results,
-        )
 
     suggestions = []
     for hotel in raw_suggestions:
+        if request.hotel_type != "any" and hotel.get("hotel_type") != request.hotel_type:
+            continue
         enriched = _add_transfer_fields(hotel, origin, trip)
+        if enriched["transfer_distance_km"] > request.radius_km:
+            continue
         enriched["day_number"] = day_number
         enriched["route_plan_id"] = route_plan.id
         enriched["rooms"] = request.rooms
         suggestions.append(enriched)
+
+    suggestions.sort(key=lambda item: item.get("transfer_distance_km", float("inf")))
 
     return {
         "trip_id": trip.id,
         "day_number": day_number,
         "route_plan_id": route_plan.id,
         "suggestions": suggestions,
-        "summary": f"Hotel suggestions near the end of day {day_number}.",
+        "summary": f"Hotel suggestions within {request.radius_km:g} km of the end of day {day_number}.",
     }
 
 
@@ -574,14 +531,7 @@ def select_hotel_for_route_day(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(Trip.id == trip_id, Trip.user_id == current_user.id)
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     route_plan = _latest_confirmed_route(db, trip)
 
@@ -665,14 +615,7 @@ def get_daily_hotel_selections(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(Trip.id == trip_id, Trip.user_id == current_user.id)
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = require_trip_access(db, trip_id, current_user.id)
 
     return (
         db.query(SelectedHotel)

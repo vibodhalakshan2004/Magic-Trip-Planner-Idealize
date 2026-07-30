@@ -2,8 +2,7 @@ from datetime import date
 from typing import List, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 HotelType = Literal[
     "hotel",
@@ -196,6 +195,7 @@ class DailyHotelSuggestRequest(BaseModel):
     hotel_preference: str | None = None
     rooms: int = Field(default=1, ge=1, le=10)
     max_results: int = Field(default=5, ge=3, le=10)
+    radius_km: float = Field(default=20, ge=2, le=75)
 
 
 class DailyHotelSuggestionResponse(BaseModel):

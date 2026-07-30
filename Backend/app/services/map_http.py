@@ -1,6 +1,7 @@
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,11 +10,13 @@ from requests import Response
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.core.config import settings
+
 
 class MapHttpClient:
 
     def __init__(self):
-        self._cache: dict[str, Any] = {}
+        self._cache: dict[str, tuple[float, Any]] = {}
         self._last_request_times: dict[str, float] = {}
         self._lock = threading.Lock()
         self._session = requests.Session()
@@ -44,15 +47,57 @@ class MapHttpClient:
 
             self._last_request_times[host] = time.time()
 
-    def _store_cache(self, cache_key: str | None, value: Any):
+    def _store_cache(self, cache_key: str | None, value: Any, ttl_seconds: int):
         if cache_key:
-            self._cache[cache_key] = value
+            self._cache[cache_key] = (time.time() + ttl_seconds, value)
+            if settings.PROVIDER_CACHE_ENABLED:
+                try:
+                    from app.core.database import SessionLocal
+                    from app.models.external_cache import ExternalCache
+
+                    with SessionLocal() as db:
+                        cached = db.get(ExternalCache, cache_key)
+                        if cached:
+                            cached.payload = value
+                            cached.expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+                        else:
+                            db.add(
+                                ExternalCache(
+                                    cache_key=cache_key,
+                                    payload=value,
+                                    expires_at=datetime.utcnow() + timedelta(seconds=ttl_seconds),
+                                )
+                            )
+                        db.commit()
+                except Exception:
+                    # Provider responses remain usable if the shared cache is
+                    # temporarily unavailable; the short-lived local cache is a fallback.
+                    pass
 
     def _cached(self, cache_key: str | None) -> Any:
         if not cache_key:
             return None
 
-        return self._cache.get(cache_key)
+        local = self._cache.get(cache_key)
+        if local:
+            expires_at, payload = local
+            if expires_at > time.time():
+                return payload
+            self._cache.pop(cache_key, None)
+
+        if settings.PROVIDER_CACHE_ENABLED:
+            try:
+                from app.core.database import SessionLocal
+                from app.models.external_cache import ExternalCache
+
+                with SessionLocal() as db:
+                    cached = db.get(ExternalCache, cache_key)
+                    if cached and cached.expires_at > datetime.utcnow():
+                        return cached.payload
+            except Exception:
+                pass
+
+        return None
 
     def _raise_for_status(self, response: Response, context: str):
         if response.ok:
@@ -78,6 +123,7 @@ class MapHttpClient:
         min_interval_seconds: float = 0,
         context: str = "HTTP request",
         before_request: Callable[[], None] | None = None,
+        cache_ttl_seconds: int | None = None,
     ) -> Any:
         cached = self._cached(cache_key)
 
@@ -99,7 +145,11 @@ class MapHttpClient:
         self._raise_for_status(response, context)
 
         data = response.json()
-        self._store_cache(cache_key, data)
+        self._store_cache(
+            cache_key,
+            data,
+            cache_ttl_seconds or settings.PROVIDER_CACHE_DEFAULT_TTL_SECONDS,
+        )
 
         return data
 
@@ -114,6 +164,7 @@ class MapHttpClient:
         min_interval_seconds: float = 0,
         context: str = "HTTP request",
         before_request: Callable[[], None] | None = None,
+        cache_ttl_seconds: int | None = None,
     ) -> Any:
         cached = self._cached(cache_key)
 
@@ -135,7 +186,11 @@ class MapHttpClient:
         self._raise_for_status(response, context)
 
         data = response.json()
-        self._store_cache(cache_key, data)
+        self._store_cache(
+            cache_key,
+            data,
+            cache_ttl_seconds or settings.PROVIDER_CACHE_DEFAULT_TTL_SECONDS,
+        )
 
         return data
 

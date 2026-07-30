@@ -2,13 +2,18 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.security import create_access_token, hash_password, verify_password, verify_token
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    verify_password,
+    verify_token,
+)
 from app.main import app
 from app.models.budget_estimate import BudgetEstimate
 from app.models.preference import Preference
@@ -17,8 +22,9 @@ from app.models.route_plan import RoutePlan
 from app.models.selected_hotel import SelectedHotel
 from app.models.selected_place import SelectedPlace
 from app.models.trip import Trip
-from app.services.media_lookup import MediaLookupService
+from app.models.user import User
 from app.schemas.user import UserCreate
+from app.services.media_lookup import MediaLookupService
 
 
 class FakeQuery:
@@ -35,6 +41,9 @@ class FakeQuery:
     def first(self):
         if self.model is Trip:
             return self.db.trip
+
+        if self.model is User:
+            return self.db.user
 
         if self.model is Preference:
             return self.db.preference
@@ -72,6 +81,7 @@ class FakeDB:
             id=user_id,
             name="Test User",
             email="test@example.com",
+            password_hash=hash_password("StrongPass!2026"),
         )
         self.trip = SimpleNamespace(
             id=trip_id,
@@ -206,6 +216,10 @@ def test_openapi_exposes_planner_restore_endpoints():
         "/hotels/trips/{trip_id}/selected-hotels",
         "/routes/trips/{trip_id}/latest",
         "/budget/trips/{trip_id}/latest",
+        "/planning/trips/{trip_id}/jobs",
+        "/planning/jobs/{job_id}/cancel",
+        "/planning/trips/{trip_id}/versions",
+        "/collaboration/trips/{trip_id}",
     }
 
     assert expected_paths.issubset(schema["paths"].keys())
@@ -303,3 +317,25 @@ def test_auth_tokens_and_password_limits_are_safe():
             email="test@example.com",
             password="short",
         )
+
+
+def test_login_uses_http_only_cookie_and_logout_clears_it():
+    fake_db = FakeDB()
+
+    def override_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        client = TestClient(app)
+        login = client.post(
+            "/auth/login",
+            data={"username": fake_db.user.email, "password": "StrongPass!2026"},
+        )
+        assert login.status_code == 200
+        assert "HttpOnly" in login.headers["set-cookie"]
+        assert client.get("/auth/me").status_code == 200
+        assert client.post("/auth/logout").status_code == 200
+        assert client.get("/auth/me").status_code == 401
+    finally:
+        app.dependency_overrides.clear()

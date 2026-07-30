@@ -242,3 +242,36 @@ export type Review = {
   review_text: string;
   visit_date: string;
 };
+
+export type PlanningJob = {
+  id: string;
+  trip_id: string;
+  kind: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  progress: number;
+  current_stage: string;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+  cancel_requested: boolean;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at: string;
+};
+
+export type TripVersion = {
+  id: string;
+  trip_id: string;
+  version_number: number;
+  label: string;
+  created_at: string;
+};
+
+export type Collaborator = {
+  id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  role: "viewer" | "editor";
+  created_at: string;
+};

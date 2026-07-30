@@ -14,7 +14,6 @@ import { usePlannerStore } from "@/lib/store/planner-store";
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const queryClient = useQueryClient();
   const setSession = useAuthStore((state) => state.setSession);
-  const setUser = useAuthStore((state) => state.setUser);
   const resetPlanner = usePlannerStore((state) => state.reset);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -48,12 +47,11 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         await authApi.register({ name: name.trim() || "Traveler", email: email.trim(), password });
       }
 
-      const token = await authApi.login(email.trim(), password);
+      await authApi.login(email.trim(), password);
       resetPlanner();
       queryClient.clear();
-      setSession(token.access_token);
-      const user = await authApi.me(token.access_token);
-      setUser(user);
+      const user = await authApi.me();
+      setSession(user);
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err);

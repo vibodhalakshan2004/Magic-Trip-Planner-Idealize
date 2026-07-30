@@ -1,23 +1,13 @@
-from fastapi import APIRouter
-from fastapi import Depends
-from fastapi import HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordRequestForm
-
-
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
-
-from app.models.user import User
-
-from app.schemas.user import RegisterResponse, TokenResponse, UserCreate, UserResponse
-
-from app.core.security import hash_password
-
-from app.core.security import verify_password
-from app.core.security import create_access_token
 from app.core.dependencies import get_current_user
-
+from app.core.security import create_access_token, hash_password, verify_password
+from app.models.user import User
+from app.schemas.user import RegisterResponse, TokenResponse, UserCreate, UserResponse
 
 router = APIRouter(
     prefix="/auth",
@@ -65,6 +55,7 @@ def register_user(
 
 @router.post("/login", response_model=TokenResponse)
 def login_user(
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -94,10 +85,31 @@ def login_user(
         {"sub": str(user.id)}
     )
 
+    response.set_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        value=token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        path="/",
+    )
+
     return {
         "access_token": token,
         "token_type": "bearer"
     }
+
+
+@router.post("/logout")
+def logout_user(response: Response):
+    response.delete_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+    )
+    return {"message": "Logged out"}
 
 @router.get("/me", response_model=UserResponse)
 def get_me(

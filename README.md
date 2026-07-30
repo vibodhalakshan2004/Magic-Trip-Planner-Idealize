@@ -1,4 +1,4 @@
-# MagicTripPlanner Backend
+# MagicTripPlanner
 
 MagicTripPlanner is an AI-assisted full-stack travel planner built with FastAPI, PostgreSQL, Next.js, Gemini, OpenStreetMap services, OpenRouteService, and optional quota-guarded Google web services. It generates destination suggestions, hotel recommendations, editable route plans, weather guidance, and budget estimates for Sri Lanka-focused trips.
 
@@ -57,6 +57,15 @@ MagicTripPlanner is an AI-assisted full-stack travel planner built with FastAPI,
 - A self-contained offline HTML itinerary, with private toolkit data excluded unless the user explicitly includes it.
 - Hotel booking-search and Google Maps handoff links that open only when the user chooses them and do not consume the project API key quota.
 - Installable web-app metadata for supported browsers.
+- One-click full-plan jobs with durable progress, cancellation, idempotency, and a separate worker process.
+- Automatic and manual trip checkpoints with version restore.
+- Viewer/editor sharing with other registered MagicTripPlanner accounts.
+
+### Reliability and security
+- HttpOnly, SameSite session cookies; bearer tokens remain accepted for API compatibility but are not stored by the frontend.
+- Configurable credentialed CORS, authentication/API rate limits, request IDs, response timing, and security headers.
+- Shared PostgreSQL provider cache and transaction-safe Google usage counters across backend and worker processes.
+- Database indexes for trip restore, planning jobs, selected places/hotels, routes, budgets, reviews, and version history.
 
 ## Tech stack
 
@@ -93,6 +102,14 @@ DATABASE_URL=postgresql://...
 SECRET_KEY=replace-me
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
+FRONTEND_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+SESSION_COOKIE_SECURE=false
+SESSION_COOKIE_SAMESITE=lax
+API_RATE_LIMIT_PER_MINUTE=180
+AUTH_RATE_LIMIT_PER_MINUTE=10
+PLANNING_WORKER_POLL_SECONDS=1.5
+PROVIDER_CACHE_ENABLED=true
+PROVIDER_CACHE_DEFAULT_TTL_SECONDS=3600
 GEMINI_API_KEY=replace-me
 GEMINI_MODEL=gemini-2.5-flash
 ORS_API_KEY=optional-but-recommended
@@ -114,6 +131,7 @@ Notes:
 - `ORS_API_KEY` is optional, but recommended. When present, the backend uses OpenRouteService first and falls back to OSRM if needed.
 - `OPENWEATHER_API_KEY` is optional. When present, selected places are enriched with trip-date weather summaries and warnings.
 - `GOOGLE_API_KEY` is a server-only key for the enabled Google Weather, Places, Routes, and Geocoding web services. Do not prefix it with `NEXT_PUBLIC_` and do not commit `Backend/.env`.
+- In production, set `SESSION_COOKIE_SECURE=true` and replace `FRONTEND_ORIGINS` with the exact HTTPS frontend origin.
 
 ## Google API safety and free-limit protection
 
@@ -124,12 +142,12 @@ Google Maps Platform requires billing even when usage stays inside its monthly f
 - Google Weather is enabled only when `GOOGLE_API_KEY` is configured and `GOOGLE_WEATHER_ENABLED=true`.
 - Google Places, Routes, and Geocoding are implemented but disabled by default while the frontend map uses Leaflet/OpenStreetMap.
 - Every Google request reserves persistent local quota immediately before the HTTP request.
-- Cached responses do not consume another local unit during the same server process.
+- Shared cached responses do not consume another local unit across backend processes.
 - When a local limit is reached, the call is not sent and the existing OpenWeather, Nominatim, OpenRouteService, or OSRM provider is used.
 - Trip dates outside Google's current 10-day forecast window do not trigger Weather API calls.
 - Nearby locations share a weather cache bucket to prevent one request per attraction card.
 
-Counters are stored in `Backend/.google_api_usage.sqlite3`, which is ignored by Git. Inspect them without revealing the key:
+Counters are stored transactionally in PostgreSQL so all containers share the same allowance. Inspect them without revealing the key:
 
 ```powershell
 Invoke-RestMethod http://localhost:8000/health/providers
@@ -167,7 +185,7 @@ GOOGLE_ROUTES_ENABLED=false
 GOOGLE_GEOCODING_ENABLED=false
 ```
 
-Enable them only after migrating the mapped experience to Maps JavaScript API or after confirming that the relevant output is not displayed on the OSM map. Google Weather can be enabled independently after it is enabled in the same Google Cloud project. The controlled smoke test on 2026-07-22 returned `SERVICE_DISABLED`, so the repository default remains false and OpenWeather continues as the fallback until the Cloud setting propagates.
+Enable them only after migrating the mapped experience to Maps JavaScript API or after confirming that the relevant output is not displayed on the OSM map. Google Weather can be enabled independently after it is enabled in the same Google Cloud project. Repository defaults remain false and the non-Google providers continue as fallbacks.
 
 ### Testing policy
 
@@ -191,6 +209,52 @@ pip install -r requirements-migrations.txt
 pip install -r requirements-dev.txt
 ```
 
+## Run the full stack with Docker
+
+Docker Compose starts PostgreSQL, applies all Alembic migrations, and then
+starts the FastAPI backend, durable planning worker, and Next.js frontend.
+
+1. Optionally copy the backend environment template and add real API keys:
+
+   ```powershell
+   Copy-Item Backend/.env.example Backend/.env
+   ```
+
+   The stack can start with the example values, but Gemini-powered suggestions
+   require a real `GEMINI_API_KEY`. Optional provider keys remain disabled until
+   their matching feature flags are enabled.
+
+2. Build and start every service from the repository root:
+
+   ```powershell
+   docker compose up --build
+   ```
+
+3. Open the application at [http://localhost:3000](http://localhost:3000).
+   The API is available at [http://localhost:8000](http://localhost:8000), and
+   its interactive docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+Useful commands:
+
+```powershell
+docker compose ps                 # Check container health
+docker compose logs -f            # Follow all service logs
+docker compose down               # Stop containers and retain data
+docker compose down --volumes     # Stop containers and delete local Docker data
+```
+
+PostgreSQL data, shared provider cache entries, and Google API quota counters
+are stored in the `postgres_data` Docker volume. Google web-service features
+remain disabled unless their individual flags are deliberately enabled. To use
+a backend URL other than `http://localhost:8000`, set
+`NEXT_PUBLIC_API_BASE_URL` before building the frontend, then rebuild it:
+
+```powershell
+$env:NEXT_PUBLIC_API_BASE_URL = "http://your-host:8000"
+docker compose build frontend
+docker compose up -d
+```
+
 ## Database setup
 
 This backend now uses Alembic migrations instead of creating tables at import time.
@@ -204,7 +268,7 @@ alembic upgrade head
 
 If you already have an existing database created by an older version of the app, the baseline migration is written to be safe on an already-populated schema and will add missing pieces such as the `preferences.interests` column when needed.
 
-After pulling the latest changes, run migrations again so the media fields and the new trip toolkit fields (`traveler_notes`, `emergency_contact`, `checklist`, and `expenses`) are added.
+After pulling the latest changes, run migrations again so media/toolkit fields plus planning jobs, trip versions, collaborators, shared cache, quota counters, and performance indexes are added.
 
 ## Run the API
 
@@ -230,6 +294,16 @@ From `Backend/`:
 python -m pytest
 ```
 
+From `Frontend/`:
+
+```powershell
+npm ci
+npm run lint
+npm run build
+```
+
+All automated tests use mocked or disabled Google providers. Do not add live API calls to the test suite.
+
 ## Recommended API flow
 
 1. `POST /auth/register`
@@ -243,6 +317,8 @@ python -m pytest
 9. `POST /routes/trips/{trip_id}/generate`
 10. `POST /budget/trips/{trip_id}/calculate`
 11. `PUT /trips/{trip_id}/toolkit` when the traveler saves notes, checklist items, or actual expenses
+
+For the automatic workflow, send `POST /planning/trips/{trip_id}/jobs` with a unique `Idempotency-Key`, then poll `GET /planning/jobs/{job_id}`. Use the cancel endpoint when the traveler stops the job. The worker saves a checkpoint before it changes the itinerary.
 
 Generating the route before the budget call gives the budget engine actual trip distance for transport cost estimation.
 
@@ -290,6 +366,8 @@ Useful restore/read endpoints for frontend refresh persistence:
 ### Hotel suggestions
 - Hotel suggestion payloads can now include `short_description` and `image_url` for frontend cards.
 - Selected hotel responses can now include `short_description` and `image_url` after save.
+- Daily search is bounded to two short OpenStreetMap requests, supports a 10-50 km UI radius, filters by accommodation type, and sorts results by transfer distance.
+- Prices, ratings, and availability are labeled as estimates until a booking provider confirms them.
 
 ### Routing
 - Daily routes begin from the trip `start_location` on day 1.
@@ -306,24 +384,26 @@ Useful restore/read endpoints for frontend refresh persistence:
 - Hotel recommendations are AI-assisted estimates, not live booking inventory.
 - Transport cost is still an estimate, even when route distance is available.
 - Google APIs do not provide general live hotel inventory or complete authoritative Sri Lankan train/bus schedules; booking and local-transport partners are still required for those features.
-- Multi-user live collaboration still requires an invitation/permission model and notification provider; the current share action sends a trip reference rather than granting another account access.
+- Collaboration currently requires the invited traveler to have an account; email delivery and simultaneous live cursor editing require a notification/realtime provider.
 
 ## High-level architecture
 
 ```text
 User Input
    |
-Auth + Preferences + Trip Setup
+HttpOnly Session + Preferences + Trip Setup
+   |
+Durable Planning Job (progress / cancel / checkpoint)
    |
 Destination Agent
    |
-Hotel Agent
-   |
 Route Agent (OpenRouteService -> OSRM fallback)
    |
-Budget Agent
+Daily Hotel Search (OpenStreetMap, Google disabled by default)
    |
-Final Trip Plan JSON
+Final Route + Budget Agent
+   |
+Versioned Trip Plan JSON
    |
 Frontend Map + Timeline UI
 ```

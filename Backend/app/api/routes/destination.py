@@ -1,38 +1,32 @@
-from uuid import UUID
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.destination_agent import DestinationAgent
-
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-
-from app.models.user import User
-from app.models.trip import Trip
 from app.models.preference import Preference
-
+from app.models.selected_place import SelectedPlace
+from app.models.trip import Trip
+from app.models.user import User
 from app.schemas.destination import (
     DestinationAgentResponse,
     DestinationSuggestRequest,
     PlaceSearchResponse,
 )
 from app.schemas.preference import PreferenceResponse
-
-from app.services.place_search import PlaceSearchService
-from app.services.geocoder import GeocoderService
-from app.services.media_lookup import MediaLookupService
-from app.services.weather_service import WeatherService
-
-from app.models.selected_place import SelectedPlace
-
 from app.schemas.selected_place import (
+    SelectedPlaceResponse,
     SelectPlacesRequest,
     SelectPlacesResponse,
-    SelectedPlaceResponse,
 )
-
+from app.services.geocoder import GeocoderService
+from app.services.media_lookup import MediaLookupService
+from app.services.place_search import PlaceSearchService
+from app.services.trip_access import require_trip_access
+from app.services.weather_service import WeatherService
 
 router = APIRouter(
     prefix="/destination",
@@ -87,20 +81,7 @@ def suggest_places_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     preference = (
         db.query(Preference)
@@ -152,20 +133,7 @@ def select_places_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     db.query(SelectedPlace).filter(
         SelectedPlace.trip_id == trip.id
@@ -264,20 +232,7 @@ def get_selected_places_for_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id)
 
     return (
         db.query(SelectedPlace)
@@ -302,20 +257,7 @@ def search_places_for_trip(
             "suggestions": [],
         }
 
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
     service = PlaceSearchService()
 

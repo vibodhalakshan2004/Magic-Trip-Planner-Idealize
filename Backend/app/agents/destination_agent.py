@@ -230,8 +230,17 @@ class DestinationAgent:
 
     def _enrich_with_weather(self, trip: Any, result: DestinationAgentResponse) -> DestinationAgentResponse:
         for place in result.suggested_places:
+            query = self._make_place_query(place, trip)
+
+            if not getattr(place, "image_url", None):
+                try:
+                    media = self.media_lookup.lookup_media(query)
+                    place.image_url = media.get("image_url")
+                except Exception:
+                    pass
+
             try:
-                geocoded = self.geocoder.geocode(self._make_place_query(place, trip))
+                geocoded = self.geocoder.geocode(query)
 
                 if not geocoded:
                     continue
@@ -258,10 +267,6 @@ class DestinationAgent:
                     place,
                     weather_warnings,
                 )
-
-                if not getattr(place, "image_url", None):
-                    media = self.media_lookup.lookup_media(self._make_place_query(place, trip))
-                    place.image_url = media.get("image_url")
 
             except Exception:
                 continue

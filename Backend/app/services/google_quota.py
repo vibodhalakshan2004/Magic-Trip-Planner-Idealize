@@ -34,7 +34,7 @@ class GoogleQuotaGuard:
     _lock = threading.Lock()
 
     def __init__(self, database_path: Path | None = None):
-        self.database_path = Path(database_path or settings.GOOGLE_USAGE_DB_PATH)
+        self.database_path = Path(database_path) if database_path is not None else None
 
     @staticmethod
     def _period() -> str:
@@ -51,6 +51,8 @@ class GoogleQuotaGuard:
         }
 
     def _connect(self) -> sqlite3.Connection:
+        if self.database_path is None:
+            raise RuntimeError("SQLite quota storage was not configured")
         if self.database_path.parent != Path("."):
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path, timeout=10)
@@ -77,6 +79,9 @@ class GoogleQuotaGuard:
 
         limit = limits[sku]
         period = self._period()
+
+        if self.database_path is None:
+            return self._reserve_postgres(sku, units, limit, period)
 
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -106,9 +111,51 @@ class GoogleQuotaGuard:
 
         return GoogleQuotaStatus(sku=sku, used=new_used, limit=limit)
 
+    def _reserve_postgres(self, sku: str, units: int, limit: int, period: str) -> GoogleQuotaStatus:
+        from sqlalchemy.dialects.postgresql import insert
+
+        from app.core.database import SessionLocal
+        from app.models.google_api_usage import GoogleApiUsage
+
+        with SessionLocal() as db:
+            db.execute(
+                insert(GoogleApiUsage)
+                .values(period=period, sku=sku, used=0)
+                .on_conflict_do_nothing(index_elements=["period", "sku"])
+            )
+            db.commit()
+            row = db.query(GoogleApiUsage).filter(
+                GoogleApiUsage.period == period,
+                GoogleApiUsage.sku == sku,
+            ).with_for_update().one()
+            if row.used + units > limit:
+                db.rollback()
+                raise GoogleQuotaExceeded(
+                    f"Google {sku} safety limit reached ({row.used}/{limit}). "
+                    "The request was not sent; a fallback provider will be used."
+                )
+            row.used += units
+            db.commit()
+            return GoogleQuotaStatus(sku=sku, used=row.used, limit=limit)
+
     def status(self) -> list[GoogleQuotaStatus]:
         period = self._period()
         limits = self.limits()
+
+        if self.database_path is None:
+            from app.core.database import SessionLocal
+            from app.models.google_api_usage import GoogleApiUsage
+
+            with SessionLocal() as db:
+                rows = dict(
+                    db.query(GoogleApiUsage.sku, GoogleApiUsage.used)
+                    .filter(GoogleApiUsage.period == period)
+                    .all()
+                )
+            return [
+                GoogleQuotaStatus(sku=sku, used=int(rows.get(sku, 0)), limit=limit)
+                for sku, limit in limits.items()
+            ]
 
         with self._lock, self._connect() as connection:
             rows = dict(
