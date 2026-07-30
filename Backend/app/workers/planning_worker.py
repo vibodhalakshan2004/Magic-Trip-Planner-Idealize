@@ -20,6 +20,7 @@ from app.api.routes.route_plan import (
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.planning_job import PlanningJob
+from app.models.selected_place import SelectedPlace
 from app.models.trip import Trip
 from app.models.user import User
 from app.schemas.budget import BudgetCalculateRequest
@@ -55,31 +56,54 @@ def _run_full_plan(db: Session, job: PlanningJob) -> dict:
     trip = db.query(Trip).filter(Trip.id == job.trip_id).one()
     payload = job.payload or {}
 
-    capture_trip_version(db, trip, "Before automatic planning")
-    _update(db, job, 8, "Generating destination ideas")
-    destination = suggest_places_for_trip(
-        trip.id,
-        DestinationSuggestRequest(
-            use_saved_preferences=bool(payload.get("use_saved_preferences", True)),
-            interests=payload.get("interests", []),
-            trip_style=payload.get("trip_style", "balanced"),
-            special_notes=payload.get("special_notes") or None,
-        ),
+    resume_route = payload.get("_resume_from_stage") == "route"
+    capture_trip_version(
         db,
-        user,
-    )
-    max_places = int(payload.get("max_places", 6))
-    places = sorted(destination.suggested_places, key=lambda item: item.priority_score, reverse=True)[:max_places]
-
-    _update(db, job, 25, "Saving the best-matched places")
-    select_places_for_trip(
-        trip.id,
-        SelectPlacesRequest(selected_places=[item.model_dump(mode="json") for item in places]),
-        db,
-        user,
+        trip,
+        "Before resuming automatic planning" if resume_route else "Before automatic planning",
     )
 
-    _update(db, job, 42, "Building the day-by-day route")
+    places = []
+    if resume_route:
+        places = db.query(SelectedPlace).filter(SelectedPlace.trip_id == trip.id).all()
+        resume_route = bool(places)
+
+    if not resume_route:
+        _update(db, job, 8, "Generating destination ideas")
+        destination = suggest_places_for_trip(
+            trip.id,
+            DestinationSuggestRequest(
+                use_saved_preferences=bool(payload.get("use_saved_preferences", True)),
+                interests=payload.get("interests", []),
+                trip_style=payload.get("trip_style", "balanced"),
+                special_notes=payload.get("special_notes") or None,
+            ),
+            db,
+            user,
+        )
+        max_places = int(payload.get("max_places", 6))
+        places = sorted(
+            destination.suggested_places,
+            key=lambda item: item.priority_score,
+            reverse=True,
+        )[:max_places]
+
+        _update(db, job, 25, "Saving the best-matched places")
+        select_places_for_trip(
+            trip.id,
+            SelectPlacesRequest(
+                selected_places=[item.model_dump(mode="json") for item in places]
+            ),
+            db,
+            user,
+        )
+
+    _update(
+        db,
+        job,
+        42,
+        "Resuming from saved places" if resume_route else "Building the day-by-day route",
+    )
     route = generate_route_for_trip(trip.id, RoutePlanRequest(), db, user)
     confirm_latest_route_for_trip(trip.id, db, user)
 
@@ -145,6 +169,7 @@ def _run_full_plan(db: Session, job: PlanningJob) -> dict:
         "selected_hotel_days": selected_hotel_days,
         "budget_status": budget.budget_status,
         "version_id": str(version.id),
+        "resumed_from_saved_places": resume_route,
     }
 
 

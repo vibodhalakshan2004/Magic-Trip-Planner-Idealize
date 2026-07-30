@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Loader2, Sparkles, Square } from "lucide-react";
+import { History, Loader2, RotateCcw, Sparkles, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
@@ -9,12 +9,23 @@ import type { PlanningJob, TripVersion } from "@/lib/api/types";
 
 export function AutoPlanner({ tripId, onComplete, onError }: { tripId: string; onComplete: () => Promise<void>; onError: (error: unknown) => void }) {
   const [job, setJob] = useState<PlanningJob | null>(null);
+  const [loadingLatest, setLoadingLatest] = useState(true);
   const [advanced, setAdvanced] = useState(false);
   const [starting, setStarting] = useState(false);
   const [tripStyle, setTripStyle] = useState<"relaxed" | "balanced" | "packed">("balanced");
   const [interests, setInterests] = useState("");
   const [hotelType, setHotelType] = useState("any");
   const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    planningApi.getLatestJob(tripId).then((latest) => {
+      if (mounted) setJob(latest);
+    }).catch(onError).finally(() => {
+      if (mounted) setLoadingLatest(false);
+    });
+    return () => { mounted = false; };
+  }, [tripId, onError]);
 
   useEffect(() => {
     if (!job || !["queued", "running"].includes(job.status)) return;
@@ -59,19 +70,34 @@ export function AutoPlanner({ tripId, onComplete, onError }: { tripId: string; o
     }
   }
 
+  async function retry() {
+    if (!job || job.status !== "failed") return;
+    setStarting(true);
+    onError(undefined);
+    try {
+      setJob(await planningApi.retryJob(job.id, crypto.randomUUID()));
+    } catch (error) {
+      onError(error);
+    } finally {
+      setStarting(false);
+    }
+  }
+
   const active = !!job && ["queued", "running"].includes(job.status);
   return (
     <section className="rounded-md border border-violet-200 bg-violet-50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><p className="font-black text-violet-950">Plan it for me</p><p className="text-sm text-violet-700">Build places, route, daily stays, and budget in a recoverable background job.</p></div>
         <div className="flex gap-2">
-          {!active ? <Button onClick={() => void start()} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Create full plan</Button> : null}
+          {!active && job?.status === "failed" ? <Button onClick={() => void retry()} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Resume plan</Button> : null}
+          {!active && job?.status !== "failed" ? <Button onClick={() => void start()} disabled={starting || loadingLatest}>{starting || loadingLatest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} {loadingLatest ? "Checking previous plan" : "Create full plan"}</Button> : null}
+          {!active && job?.status === "failed" ? <Button variant="ghost" onClick={() => void start()} disabled={starting}>Start over (uses AI)</Button> : null}
           {active ? <Button variant="danger" onClick={() => void planningApi.cancelJob(job.id).then(setJob).catch(onError)}><Square className="h-4 w-4" /> Cancel</Button> : null}
           {!active ? <Button variant="ghost" onClick={() => setAdvanced((value) => !value)}>{advanced ? "Hide options" : "Options"}</Button> : null}
         </div>
       </div>
       {advanced && !active ? <div className="mt-4 grid gap-3 md:grid-cols-3"><Field label="Travel pace"><select className={inputClass} value={tripStyle} onChange={(event) => setTripStyle(event.target.value as typeof tripStyle)}><option value="relaxed">Relaxed</option><option value="balanced">Balanced</option><option value="packed">Packed</option></select></Field><Field label="Interests"><input className={inputClass} value={interests} onChange={(event) => setInterests(event.target.value)} placeholder="nature, culture, food" /></Field><Field label="Hotel type"><select className={inputClass} value={hotelType} onChange={(event) => setHotelType(event.target.value)}><option value="any">Any</option><option value="hotel">Hotel</option><option value="guest_house">Guest house</option><option value="resort">Resort</option><option value="hostel">Hostel</option></select></Field><div className="md:col-span-3"><Field label="Notes"><input className={inputClass} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Accessibility, pace, or must-see requests" /></Field></div></div> : null}
-      {job ? <div className="mt-4" aria-live="polite"><div className="mb-1 flex justify-between text-xs font-bold text-violet-900"><span>{job.current_stage}</span><span>{job.progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-violet-100"><div className="h-full bg-violet-600 transition-all" style={{ width: `${job.progress}%` }} /></div>{job.status === "failed" ? <p className="mt-2 text-sm font-semibold text-rose-700">{job.error}</p> : null}{job.status === "cancelled" ? <p className="mt-2 text-sm text-slate-600">Planning cancelled. Work saved before cancellation is still available.</p> : null}</div> : null}
+      {job ? <div className="mt-4" aria-live="polite"><div className="mb-1 flex justify-between text-xs font-bold text-violet-900"><span>{job.current_stage}</span><span>{job.progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-violet-100"><div className="h-full bg-violet-600 transition-all" style={{ width: `${job.progress}%` }} /></div>{job.status === "failed" ? <><p className="mt-2 text-sm font-semibold text-rose-700">{job.error}</p><p className="mt-1 text-xs text-violet-800">Resume plan reuses the saved places and does not generate new AI suggestions.</p></> : null}{job.status === "cancelled" ? <p className="mt-2 text-sm text-slate-600">Planning cancelled. Work saved before cancellation is still available.</p> : null}</div> : null}
     </section>
   );
 }
