@@ -25,13 +25,15 @@ import { PreferenceForm } from "@/components/planner/PreferenceForm";
 import { RouteSection } from "@/components/planner/RouteSection";
 import { SavedPreferenceDecisionModal } from "@/components/planner/SavedPreferenceDecisionModal";
 import { TripForm, type TripFormValues } from "@/components/planner/TripForm";
+import { AutoPlanner, VersionHistory } from "@/components/planner/PlanningTools";
+import { ShareTrip } from "@/components/planner/ShareTrip";
 import { money } from "@/lib/utils/format";
 
 type StepId = "preferences" | "trip" | "places" | "place-select" | "route" | "route-hotels" | "budget" | "final" | string;
 
 export function PlannerWorkspace({ tripId }: { tripId?: string }) {
   const router = useRouter();
-  const token = useAuthStore((state) => state.token);
+  const authenticated = useAuthStore((state) => state.authenticated);
   const authHydrated = useAuthStore((state) => state.hydrated);
   const store = usePlannerStore();
   const [active, setActive] = useState<StepId>(tripId ? "places" : "trip");
@@ -85,8 +87,8 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
   }
 
   useEffect(() => {
-    if (authHydrated && !token) router.replace("/login");
-  }, [authHydrated, router, token]);
+    if (authHydrated && !authenticated) router.replace("/login");
+  }, [authenticated, authHydrated, router]);
 
   useEffect(() => {
     if (!tripId) return;
@@ -156,6 +158,7 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
         {store.trip ? <div className="rounded-md bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">{money(store.trip.budget_min)} - {money(store.trip.budget_max)}</div> : null}
       </div>
       {toast ? <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{toast}</div> : null}
+      {store.trip ? <div className="mb-5 grid gap-3"><AutoPlanner tripId={store.trip.id} onComplete={async () => { await restore(store.trip!.id); setToast("Your complete plan is ready"); }} onError={setError} /><div className="grid gap-3 xl:grid-cols-2"><VersionHistory tripId={store.trip.id} onRestored={async () => { await restore(store.trip!.id); setToast("Trip version restored"); }} onError={setError} /><ShareTrip tripId={store.trip.id} onError={setError} /></div></div> : null}
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
         <PlannerStepper steps={steps} active={active} onSelect={(id) => setActive(id as StepId)} />
         <div className="grid gap-4">

@@ -11,19 +11,19 @@ import { useAuthStore } from "@/lib/store/auth-store";
 
 export default function ReviewsPage() {
   const router = useRouter();
-  const token = useAuthStore((state) => state.token);
+  const authenticated = useAuthStore((state) => state.authenticated);
   const user = useAuthStore((state) => state.user);
   const authHydrated = useAuthStore((state) => state.hydrated);
   const [error, setError] = useState<unknown>();
   const reviews = useQuery({
     queryKey: ["reviews", user?.id],
     queryFn: reviewsApi.myReviews,
-    enabled: authHydrated && !!token && !!user?.id,
+    enabled: authHydrated && authenticated && !!user?.id,
   });
 
   useEffect(() => {
-    if (authHydrated && !token) router.replace("/login");
-  }, [authHydrated, router, token]);
+    if (authHydrated && !authenticated) router.replace("/login");
+  }, [authenticated, authHydrated, router]);
 
   async function submit(values: ReviewFormValues) {
     setError(undefined);

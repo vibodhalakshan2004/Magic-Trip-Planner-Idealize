@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { LogoBrand } from "@/components/LogoBrand";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { usePlannerStore } from "@/lib/store/planner-store";
+import * as authApi from "@/lib/api/auth";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -31,7 +32,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Button
                 variant="ghost"
                 aria-label="Log out"
-                onClick={() => {
+                onClick={async () => {
+                  await authApi.logout().catch(() => undefined);
                   logout();
                   resetPlanner();
                   queryClient.clear();

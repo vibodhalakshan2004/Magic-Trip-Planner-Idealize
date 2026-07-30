@@ -9,11 +9,13 @@ import { fallbackImage, money } from "@/lib/utils/format";
 import * as destinationApi from "@/lib/api/destination";
 import * as hotelApi from "@/lib/api/hotels";
 
-function SmartImage({ src, alt, kind }: { src?: string | null; alt: string; kind: "place" | "hotel" }) {
+export function SmartImage({ src, alt, kind, className = "h-44 w-full rounded-t-md object-cover" }: { src?: string | null; alt: string; kind: "place" | "hotel"; className?: string }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const imageSrc = useMemo(() => {
-    if (!src || failedSrc === src) return fallbackImage(alt, kind);
-    return `/api/image?url=${encodeURIComponent(src)}`;
+    const sourceKey = src ?? `lookup:${alt}`;
+    if (failedSrc === sourceKey) return fallbackImage(alt, kind);
+    if (src) return `/api/image?url=${encodeURIComponent(src)}&label=${encodeURIComponent(alt)}`;
+    return `/api/image?query=${encodeURIComponent(alt)}&label=${encodeURIComponent(alt)}`;
   }, [alt, failedSrc, kind, src]);
 
   return (
@@ -23,8 +25,8 @@ function SmartImage({ src, alt, kind }: { src?: string | null; alt: string; kind
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
-      onError={() => setFailedSrc(src ?? "__fallback")}
-      className="h-44 w-full rounded-t-md object-cover"
+      onError={() => setFailedSrc(src ?? `lookup:${alt}`)}
+      className={className}
     />
   );
 }

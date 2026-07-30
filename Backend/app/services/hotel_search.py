@@ -1,15 +1,17 @@
 import re
+from urllib.parse import quote, urlparse
 
-from app.services.map_http import map_http_client
-from app.services.media_lookup import MediaLookupService
 from app.services.google_maps import google_maps_service
+from app.services.map_http import map_http_client
 
 
 class HotelSearchService:
     BASE_URL = "https://nominatim.openstreetmap.org/search"
-
-    def __init__(self):
-        self.media_lookup = MediaLookupService()
+    MAX_SEARCH_QUERIES = 2
+    TRUSTED_IMAGE_HOSTS = {
+        "upload.wikimedia.org",
+        "commons.wikimedia.org",
+    }
 
     def search_hotels(
         self,
@@ -17,6 +19,9 @@ class HotelSearchService:
         destination: str,
         country: str = "Sri Lanka",
         limit: int = 5,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_km: float = 20,
     ):
         google_query = f"{query}, {destination}, {country}"
         if google_maps_service.enabled("places"):
@@ -34,27 +39,44 @@ class HotelSearchService:
         results = []
         seen_osm_keys = set()
 
+        centered_search = latitude is not None and longitude is not None
+
         for search_text in self._search_queries(
             query=query,
             destination=destination,
             country=country,
-        ):
+            centered=centered_search,
+        )[: self.MAX_SEARCH_QUERIES]:
             params = {
                 "q": search_text,
                 "format": "jsonv2",
                 "addressdetails": 1,
+                "extratags": 1,
+                "namedetails": 1,
+                "countrycodes": "lk",
                 "limit": limit,
             }
 
-            search_results = map_http_client.get_json(
-                self.BASE_URL,
-                params=params,
-                headers=headers,
-                timeout=10,
-                cache_key=f"hotel-search:{search_text}:{limit}",
-                min_interval_seconds=1.1,
-                context="Nominatim hotel search",
-            )
+            if centered_search:
+                params.update(
+                    {
+                        "viewbox": self._viewbox(float(latitude), float(longitude), radius_km),
+                        "bounded": 1,
+                    }
+                )
+
+            try:
+                search_results = map_http_client.get_json(
+                    self.BASE_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=4,
+                    cache_key=f"hotel-search:{search_text}:{params.get('viewbox', '')}:{limit}",
+                    min_interval_seconds=1.1,
+                    context="Nominatim hotel search",
+                )
+            except Exception:
+                continue
 
             for item in search_results:
                 osm_key = (
@@ -71,7 +93,7 @@ class HotelSearchService:
                 if len(results) >= limit:
                     break
 
-            if len(results) >= limit:
+            if results:
                 break
 
         suggestions = []
@@ -80,13 +102,14 @@ class HotelSearchService:
             display_name = item.get("display_name") or query
             name = self._extract_name(item, query)
             area = self._extract_area(item)
-            media = self.media_lookup.lookup_media(display_name)
+            image_url = self._osm_image_url(item)
+            description = self._osm_description(item)
 
             suggestions.append(
                 {
                     "hotel_key": self._make_hotel_key(display_name),
                     "name": name,
-                    "short_description": media.get("description") or self._compose_short_description(area),
+                    "short_description": description or self._compose_short_description(area),
                     "hotel_type": self._map_hotel_type(item),
                     "source": "user_added",
                     "area": area,
@@ -100,7 +123,7 @@ class HotelSearchService:
                     "amenities": [],
                     "warnings": [],
                     "search_query": display_name,
-                    "image_url": media.get("image_url"),
+                    "image_url": image_url,
                     "priority_score": 5,
                 }
             )
@@ -150,24 +173,21 @@ class HotelSearchService:
         query: str,
         destination: str,
         country: str,
+        centered: bool = False,
     ) -> list[str]:
         query = " ".join(query.split())
         destination = " ".join(destination.split())
         country = " ".join(country.split())
 
-        candidates = [
-            query,
-            f"{query}, {country}",
-            f"{query}, {destination}",
-            f"{query} {destination} {country}",
-            f"{query} in {destination} {country}",
-            f"{query} near {destination} {country}",
-            f"hotel near {query} {destination} {country}",
-            f"hotel {destination} {country}",
-            f"hotels in {destination} {country}",
-            f"accommodation {destination} {country}",
-            f"guest house {destination} {country}",
-        ]
+        if centered:
+            candidates = [query, "hotel", "guest house", "hostel"]
+        else:
+            candidates = [
+                f"{query}, {destination}, {country}",
+                f"hotel, {destination}, {country}",
+                f"guest house, {destination}, {country}",
+                f"accommodation, {destination}, {country}",
+            ]
 
         unique_candidates = []
 
@@ -176,6 +196,48 @@ class HotelSearchService:
                 unique_candidates.append(candidate)
 
         return unique_candidates
+
+    def _viewbox(self, latitude: float, longitude: float, radius_km: float) -> str:
+        radius = max(2, min(radius_km, 75)) / 111
+        return ",".join(
+            [
+                f"{longitude - radius:.6f}",
+                f"{latitude + radius:.6f}",
+                f"{longitude + radius:.6f}",
+                f"{latitude - radius:.6f}",
+            ]
+        )
+
+    def _osm_image_url(self, item: dict) -> str | None:
+        tags = item.get("extratags") or {}
+        value = tags.get("image") or tags.get("wikimedia_commons")
+
+        if not value:
+            return None
+
+        if value.lower().startswith("file:"):
+            filename = value.split(":", 1)[1].strip()
+            if filename:
+                return f"https://commons.wikimedia.org/wiki/Special:Redirect/file/{quote(filename)}"
+            return None
+
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            return None
+
+        if parsed.scheme == "https" and parsed.hostname in self.TRUSTED_IMAGE_HOSTS:
+            return value
+
+        return None
+
+    def _osm_description(self, item: dict) -> str | None:
+        tags = item.get("extratags") or {}
+        description = tags.get("description")
+        if not description:
+            return None
+        cleaned = " ".join(description.split())
+        return cleaned if len(cleaned) <= 180 else cleaned[:177].rsplit(" ", 1)[0] + "..."
 
     def _extract_name(self, item: dict, fallback: str) -> str:
         address = item.get("address") or {}

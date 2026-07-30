@@ -1,19 +1,18 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-
 from app.models.trip import Trip
+from app.models.trip_collaborator import TripCollaborator
 from app.models.user import User
-
-from app.schemas.trip import TripCreate, TripResponse
 from app.schemas.toolkit import TripToolkitResponse, TripToolkitUpdate
-
+from app.schemas.trip import TripCreate, TripResponse
+from app.services.trip_access import require_trip_access
 
 router = APIRouter(
     prefix="/trips",
@@ -53,7 +52,16 @@ def get_my_trips(
 ):
     return (
         db.query(Trip)
-        .filter(Trip.user_id == current_user.id)
+        .filter(
+            or_(
+                Trip.user_id == current_user.id,
+                Trip.id.in_(
+                    select(TripCollaborator.trip_id).where(
+                        TripCollaborator.user_id == current_user.id
+                    )
+                ),
+            )
+        )
         .order_by(func.coalesce(Trip.updated_at, Trip.created_at).desc(), Trip.created_at.desc())
         .all()
     )
@@ -65,36 +73,11 @@ def get_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
-
-    return trip
+    return require_trip_access(db, trip_id, current_user.id)
 
 
-def _owned_trip(trip_id: UUID, db: Session, current_user: User) -> Trip:
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    return trip
+def _accessible_trip(trip_id: UUID, db: Session, current_user: User, *, write: bool = False) -> Trip:
+    return require_trip_access(db, trip_id, current_user.id, write=write)
 
 
 def _toolkit_response(trip: Trip) -> TripToolkitResponse:
@@ -118,7 +101,7 @@ def get_trip_toolkit(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _toolkit_response(_owned_trip(trip_id, db, current_user))
+    return _toolkit_response(_accessible_trip(trip_id, db, current_user))
 
 
 @router.put("/{trip_id}/toolkit", response_model=TripToolkitResponse)
@@ -128,7 +111,7 @@ def update_trip_toolkit(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = _owned_trip(trip_id, db, current_user)
+    trip = _accessible_trip(trip_id, db, current_user, write=True)
     trip.traveler_notes = toolkit.traveler_notes.strip()
     trip.emergency_contact = toolkit.emergency_contact.strip()
     trip.checklist = [item.model_dump(mode="json") for item in toolkit.checklist]
@@ -145,20 +128,7 @@ def delete_trip(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    trip = (
-        db.query(Trip)
-        .filter(
-            Trip.id == trip_id,
-            Trip.user_id == current_user.id,
-        )
-        .first()
-    )
-
-    if not trip:
-        raise HTTPException(
-            status_code=404,
-            detail="Trip not found",
-        )
+    trip = require_trip_access(db, trip_id, current_user.id, owner_only=True)
 
     db.delete(trip)
     db.commit()

@@ -5,7 +5,7 @@ import pytest
 from app.core.config import settings
 from app.services.google_maps import GoogleMapsService
 from app.services.google_quota import GoogleQuotaExceeded, GoogleQuotaGuard
-from app.services.map_http import map_http_client
+from app.services.map_http import MapHttpClient, map_http_client
 
 
 def test_google_quota_guard_stops_before_configured_limit(tmp_path, monkeypatch):
@@ -17,6 +17,31 @@ def test_google_quota_guard_stops_before_configured_limit(tmp_path, monkeypatch)
 
     with pytest.raises(GoogleQuotaExceeded):
         guard.reserve("weather")
+
+
+def test_provider_response_cache_prevents_duplicate_http_calls(monkeypatch):
+    client = MapHttpClient()
+    calls = []
+    monkeypatch.setattr(settings, "PROVIDER_CACHE_ENABLED", False)
+
+    class Response:
+        ok = True
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"items": ["cached"]}
+
+    def fake_get(*args, **kwargs):
+        calls.append(args[0])
+        return Response()
+
+    monkeypatch.setattr(client._session, "get", fake_get)
+    first = client.get_json("https://example.invalid/data", cache_key="test-cache")
+    second = client.get_json("https://example.invalid/data", cache_key="test-cache")
+
+    assert first == second == {"items": ["cached"]}
+    assert calls == ["https://example.invalid/data"]
 
 
 def test_google_daily_weather_parser_uses_one_guarded_request(monkeypatch):

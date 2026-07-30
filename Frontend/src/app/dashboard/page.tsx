@@ -17,21 +17,21 @@ import { money } from "@/lib/utils/format";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const token = useAuthStore((state) => state.token);
+  const authenticated = useAuthStore((state) => state.authenticated);
   const user = useAuthStore((state) => state.user);
   const authHydrated = useAuthStore((state) => state.hydrated);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>();
-  const trips = useQuery({ queryKey: ["trips", user?.id], queryFn: listTrips, enabled: authHydrated && !!token && !!user?.id });
-  const prefs = useQuery({ queryKey: ["preferences", user?.id], queryFn: getPreferences, enabled: authHydrated && !!token && !!user?.id });
+  const trips = useQuery({ queryKey: ["trips", user?.id], queryFn: listTrips, enabled: authHydrated && authenticated && !!user?.id });
+  const prefs = useQuery({ queryKey: ["preferences", user?.id], queryFn: getPreferences, enabled: authHydrated && authenticated && !!user?.id });
   const sortedTrips = useMemo(
     () => [...(trips.data ?? [])].sort((a, b) => new Date(b.updated_at ?? b.created_at ?? 0).getTime() - new Date(a.updated_at ?? a.created_at ?? 0).getTime()),
     [trips.data],
   );
 
   useEffect(() => {
-    if (authHydrated && !token) router.replace("/login");
-  }, [authHydrated, router, token]);
+    if (authHydrated && !authenticated) router.replace("/login");
+  }, [authenticated, authHydrated, router]);
 
   async function removeTrip(trip: Trip) {
     if (!window.confirm(`Delete trip to ${trip.destination}?`)) return;

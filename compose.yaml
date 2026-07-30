@@ -1,0 +1,99 @@
+name: magic-trip-planner
+
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: magic_trip_planner
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d magic_trip_planner"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./Backend
+    env_file:
+      - path: ./Backend/.env.example
+        required: true
+      - path: ./Backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/magic_trip_planner
+      GOOGLE_WEATHER_ENABLED: "false"
+      GOOGLE_PLACES_ENABLED: "false"
+      GOOGLE_ROUTES_ENABLED: "false"
+      GOOGLE_GEOCODING_ENABLED: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      database:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  planning-worker:
+    build:
+      context: ./Backend
+    command: ["python", "-m", "app.workers.planning_worker"]
+    env_file:
+      - path: ./Backend/.env.example
+        required: true
+      - path: ./Backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/magic_trip_planner
+      GOOGLE_WEATHER_ENABLED: "false"
+      GOOGLE_PLACES_ENABLED: "false"
+      GOOGLE_ROUTES_ENABLED: "false"
+      GOOGLE_GEOCODING_ENABLED: "false"
+    depends_on:
+      database:
+        condition: service_healthy
+        restart: true
+      backend:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./Frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:3000', (response) => process.exit(response.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
