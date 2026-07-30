@@ -21,8 +21,13 @@ export const createJob = (tripId: string, body: FullPlanOptions, idempotencyKey:
     body: JSON.stringify(body),
   });
 export const getJob = (jobId: string) => request<PlanningJob>(`/planning/jobs/${jobId}`);
+export const getLatestJob = (tripId: string) => request<PlanningJob | null>(`/planning/trips/${tripId}/jobs/latest`);
 export const cancelJob = (jobId: string) => request<PlanningJob>(`/planning/jobs/${jobId}/cancel`, { method: "POST" });
+export const retryJob = (jobId: string, idempotencyKey: string) =>
+  request<PlanningJob>(`/planning/jobs/${jobId}/retry`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 export const createVersion = (tripId: string, label: string) => json<TripVersion>(`/planning/trips/${tripId}/versions`, "POST", { label });
 export const listVersions = (tripId: string) => request<TripVersion[]>(`/planning/trips/${tripId}/versions`);
 export const restoreVersion = (tripId: string, versionId: string) => request<TripVersion>(`/planning/trips/${tripId}/versions/${versionId}/restore`, { method: "POST" });
-

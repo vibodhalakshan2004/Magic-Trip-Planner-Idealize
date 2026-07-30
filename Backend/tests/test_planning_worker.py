@@ -17,14 +17,22 @@ class FakeQuery:
     def one(self):
         return self.result
 
+    def all(self):
+        return self.result if isinstance(self.result, list) else []
+
 
 class FakeDB:
-    def __init__(self, user, trip):
+    def __init__(self, user, trip, selected_places=None):
         self.user = user
         self.trip = trip
+        self.selected_places = selected_places or []
 
     def query(self, model):
-        return FakeQuery(self.user if model.__name__ == "User" else self.trip)
+        if model.__name__ == "User":
+            return FakeQuery(self.user)
+        if model.__name__ == "SelectedPlace":
+            return FakeQuery(self.selected_places)
+        return FakeQuery(self.trip)
 
     def refresh(self, instance):
         return None
@@ -91,3 +99,65 @@ def test_worker_honors_cancel_before_next_external_stage():
     job = SimpleNamespace(cancel_requested=True, progress=0, current_stage="Queued", updated_at=None)
     with pytest.raises(planning_worker.JobCancelled):
         planning_worker._update(FakeDB(None, None), job, 10, "Starting")
+
+
+def test_failed_route_retry_reuses_saved_places_without_new_ai_call(monkeypatch):
+    user = SimpleNamespace(id=uuid4())
+    trip = SimpleNamespace(id=uuid4(), user_id=user.id)
+    selected_places = [SimpleNamespace(place_key="one"), SimpleNamespace(place_key="two")]
+    db = FakeDB(user, trip, selected_places)
+    job = SimpleNamespace(
+        id=uuid4(),
+        user_id=user.id,
+        trip_id=trip.id,
+        payload={"_resume_from_stage": "route"},
+        cancel_requested=False,
+        progress=0,
+        current_stage="Queued",
+        updated_at=None,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        planning_worker,
+        "suggest_places_for_trip",
+        lambda *_args: pytest.fail("route retry must not regenerate AI suggestions"),
+    )
+    monkeypatch.setattr(
+        planning_worker,
+        "select_places_for_trip",
+        lambda *_args: pytest.fail("route retry must reuse the saved selections"),
+    )
+    monkeypatch.setattr(
+        planning_worker,
+        "generate_route_for_trip",
+        lambda *_args: SimpleNamespace(days=[1, 2]),
+    )
+    monkeypatch.setattr(
+        planning_worker,
+        "confirm_latest_route_for_trip",
+        lambda *_args: calls.append("confirm"),
+    )
+    monkeypatch.setattr(
+        planning_worker,
+        "suggest_hotels_for_route_day",
+        lambda *_args: {"suggestions": []},
+    )
+    monkeypatch.setattr(
+        planning_worker,
+        "calculate_budget_for_trip",
+        lambda *_args: SimpleNamespace(budget_status="within_budget"),
+    )
+    version_id = uuid4()
+    monkeypatch.setattr(
+        planning_worker,
+        "capture_trip_version",
+        lambda *_args: SimpleNamespace(id=version_id),
+    )
+
+    result = planning_worker._run_full_plan(db, job)
+
+    assert calls == ["confirm"]
+    assert result["selected_places"] == 2
+    assert result["resumed_from_saved_places"] is True
+    assert job.progress == 97

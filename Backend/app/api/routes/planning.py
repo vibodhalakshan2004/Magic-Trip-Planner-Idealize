@@ -76,6 +76,22 @@ def get_planning_job(
     return job
 
 
+@router.get(
+    "/trips/{trip_id}/jobs/latest",
+    response_model=PlanningJobResponse | None,
+)
+def get_latest_planning_job(
+    trip_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_trip_access(db, trip_id, current_user.id)
+    return db.query(PlanningJob).filter(
+        PlanningJob.trip_id == trip_id,
+        PlanningJob.user_id == current_user.id,
+    ).order_by(PlanningJob.created_at.desc()).first()
+
+
 @router.post("/jobs/{job_id}/cancel", response_model=PlanningJobResponse)
 def cancel_planning_job(
     job_id: UUID,
@@ -97,6 +113,67 @@ def cancel_planning_job(
     db.commit()
     db.refresh(job)
     return job
+
+
+@router.post(
+    "/jobs/{job_id}/retry",
+    response_model=PlanningJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_planning_job(
+    job_id: UUID,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=120),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    failed_job = db.query(PlanningJob).filter(
+        PlanningJob.id == job_id,
+        PlanningJob.user_id == current_user.id,
+    ).first()
+    if not failed_job:
+        raise HTTPException(status_code=404, detail="Planning job not found")
+    if failed_job.status != "failed":
+        raise HTTPException(status_code=409, detail="Only failed planning jobs can be retried")
+
+    require_trip_access(db, failed_job.trip_id, current_user.id, write=True)
+    existing = db.query(PlanningJob).filter(
+        PlanningJob.user_id == current_user.id,
+        PlanningJob.idempotency_key == idempotency_key,
+    ).first()
+    if existing:
+        return existing
+
+    active = db.query(PlanningJob).filter(
+        PlanningJob.trip_id == failed_job.trip_id,
+        PlanningJob.user_id == current_user.id,
+        PlanningJob.status.in_(("queued", "running")),
+    ).first()
+    if active:
+        raise HTTPException(status_code=409, detail="A planning job is already active for this trip")
+
+    payload = dict(failed_job.payload or {})
+    if failed_job.progress >= 25:
+        payload["_resume_from_stage"] = "route"
+
+    retry_job = PlanningJob(
+        user_id=current_user.id,
+        trip_id=failed_job.trip_id,
+        kind="full_plan_retry",
+        idempotency_key=idempotency_key,
+        payload=payload,
+        current_stage="Queued to resume saved planning work",
+    )
+    db.add(retry_job)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        retry_job = db.query(PlanningJob).filter(
+            PlanningJob.user_id == current_user.id,
+            PlanningJob.idempotency_key == idempotency_key,
+        ).one()
+    db.refresh(retry_job)
+    return retry_job
 
 
 @router.post("/trips/{trip_id}/versions", response_model=TripVersionResponse)

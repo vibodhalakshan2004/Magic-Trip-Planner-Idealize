@@ -13,7 +13,6 @@ from app.services.geocoder import GeocoderService
 from app.services.media_lookup import MediaLookupService
 from app.services.weather_service import WeatherService
 
-
 GEMINI_DESTINATION_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -116,6 +115,18 @@ class DestinationAgent:
             return place.search_query
 
         return f"{place.name}, {trip.destination}, Sri Lanka"
+
+    def _place_queries(self, place: Any, trip: Any) -> list[str]:
+        queries = []
+        if getattr(place, "search_query", None):
+            queries.append(place.search_query)
+        queries.extend(
+            [
+                f"{place.name}, {trip.destination}, Sri Lanka",
+                f"{place.name}, Sri Lanka",
+            ]
+        )
+        return list(dict.fromkeys(query for query in queries if query))
 
     def _adjust_priority_for_weather(self, place: Any, weather_warnings: list[str]) -> int:
         priority_score = int(getattr(place, "priority_score", 5) or 5)
@@ -240,7 +251,9 @@ class DestinationAgent:
                     pass
 
             try:
-                geocoded = self.geocoder.geocode(query)
+                geocoded = self.geocoder.geocode_candidates(
+                    self._place_queries(place, trip)
+                )
 
                 if not geocoded:
                     continue
@@ -324,6 +337,8 @@ Rules:
 - best_time_to_visit should be one of: sunrise, morning, afternoon, evening, sunset, flexible.
 - Prefer places that still make sense if weather is warm or occasionally rainy during the trip dates.
 - Avoid over-prioritizing weather-sensitive outdoor stops when indoor or flexible alternatives fit the same interests.
+- search_query must contain only the canonical place name and Sri Lanka.
+- Do not put ticket, price, cost, booking, history, entrance fee, or activity intent words in search_query.
 
 Trip data:
 {json.dumps(trip_data, ensure_ascii=False, indent=2)}

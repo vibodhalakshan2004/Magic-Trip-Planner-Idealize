@@ -1,7 +1,7 @@
-from datetime import datetime, time, timedelta
 import logging
 import math
 import re
+from datetime import datetime, time, timedelta
 from typing import Any, List, Optional
 
 from app.schemas.route import (
@@ -12,11 +12,9 @@ from app.schemas.route import (
     RoutePlanResponse,
     RouteSegment,
 )
-
 from app.services.geocoder import GeocoderService
 from app.services.osrm_router import OSRMRouterService
 from app.services.transport_cost import estimate_segment_transport_cost
-
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +144,9 @@ class RouteAgent:
         longitude = getattr(place, "longitude", None)
 
         if latitude is None or longitude is None:
-            geocoded = None
-
-            for query in self._place_queries(place, trip):
-                geocoded = self.geocoder.geocode(query)
-
-                if geocoded:
-                    break
+            geocoded = self.geocoder.geocode_candidates(
+                self._place_queries(place, trip)
+            )
 
             if not geocoded:
                 # Skip unresolvable places instead of crashing the entire route
@@ -160,6 +154,11 @@ class RouteAgent:
 
             latitude = geocoded["latitude"]
             longitude = geocoded["longitude"]
+            # SelectedPlace instances are attached to the request/worker
+            # session. Saving recovered coordinates prevents repeated lookups
+            # when the route is regenerated with hotels.
+            place.latitude = latitude
+            place.longitude = longitude
 
         return {
             "place_key": place.place_key,
@@ -181,13 +180,9 @@ class RouteAgent:
         longitude = getattr(hotel, "longitude", None)
 
         if latitude is None or longitude is None:
-            geocoded = None
-
-            for query in self._hotel_queries(hotel, trip):
-                geocoded = self.geocoder.geocode(query)
-
-                if geocoded:
-                    break
+            geocoded = self.geocoder.geocode_candidates(
+                self._hotel_queries(hotel, trip)
+            )
 
             if not geocoded:
                 destination_point = self._destination_point(trip)
@@ -197,6 +192,8 @@ class RouteAgent:
             else:
                 latitude = geocoded["latitude"]
                 longitude = geocoded["longitude"]
+                hotel.latitude = latitude
+                hotel.longitude = longitude
 
         return {
             "name": hotel.name,

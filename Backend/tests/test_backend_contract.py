@@ -217,7 +217,9 @@ def test_openapi_exposes_planner_restore_endpoints():
         "/routes/trips/{trip_id}/latest",
         "/budget/trips/{trip_id}/latest",
         "/planning/trips/{trip_id}/jobs",
+        "/planning/trips/{trip_id}/jobs/latest",
         "/planning/jobs/{job_id}/cancel",
+        "/planning/jobs/{job_id}/retry",
         "/planning/trips/{trip_id}/versions",
         "/collaboration/trips/{trip_id}",
     }

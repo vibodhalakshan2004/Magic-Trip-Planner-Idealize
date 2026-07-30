@@ -146,13 +146,12 @@ def select_places_for_trip(
         longitude = place.longitude
 
         if latitude is None or longitude is None:
-            for query in _coordinate_queries(place, trip):
-                geocoded = geocoder_service.geocode(query)
-
-                if geocoded:
-                    latitude = geocoded.get("latitude")
-                    longitude = geocoded.get("longitude")
-                    break
+            geocoded = geocoder_service.geocode_candidates(
+                _coordinate_queries(place, trip)
+            )
+            if geocoded:
+                latitude = geocoded.get("latitude")
+                longitude = geocoded.get("longitude")
 
         weather_summary = place.weather_summary
         warnings = list(place.warnings)
