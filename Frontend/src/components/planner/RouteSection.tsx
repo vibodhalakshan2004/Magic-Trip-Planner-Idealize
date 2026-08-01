@@ -43,7 +43,7 @@ export function RouteSection({
         <div>
           <p className="text-sm font-bold text-emerald-800">
             <Sparkles className="mr-1 inline h-4 w-4" />
-            AI-optimised route - {route.total_distance_km ?? 0} km - {minutes(route.total_travel_time_minutes)} - {confirmed ? "Confirmed" : "Draft"}
+            Optimised route · {route.total_distance_km ?? 0} km · {minutes(route.total_travel_time_minutes)} · {confirmed ? "Confirmed" : "Draft"}
           </p>
           {route.summary ? <p className="mt-1 text-xs text-emerald-700">{route.summary}</p> : null}
         </div>
@@ -151,7 +151,7 @@ function OptimalRouteGenerator({
       <div className="flex items-center gap-3">
         <Sparkles className="h-6 w-6 text-emerald-600" />
         <div>
-          <p className="font-black text-slate-950">Let the AI plan the optimal route</p>
+          <p className="font-black text-slate-950">Build the most practical route</p>
           <p className="text-sm text-slate-500">The route starts from your trip start location, spreads places across your trip days, and returns home on the final day.</p>
         </div>
       </div>

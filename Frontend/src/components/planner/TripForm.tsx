@@ -58,17 +58,19 @@ export function TripForm({ onSubmit }: { onSubmit: (values: TripFormValues) => P
   const startDate = useWatch({ control: form.control, name: "start_date" });
 
   return (
-    <form className="grid gap-4" onSubmit={form.handleSubmit(onSubmit)}>
-      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4">
-        <p className="text-sm font-black text-emerald-950"><Compass className="mr-1 inline h-4 w-4" />Quick-start examples</p>
-        <p className="mt-1 text-xs text-emerald-800">Use a sensible draft, then change any field before creating the trip.</p>
+    <form className="grid gap-6" onSubmit={form.handleSubmit(onSubmit)}>
+      <div className="rounded-2xl border border-[#cbded2] bg-[#eef4ef] p-4 sm:p-5">
+        <p className="text-sm font-extrabold text-[#173e34]"><Compass className="mr-1.5 inline h-4 w-4 text-[#d56535]" />Need a quick start?</p>
+        <p className="mt-1 text-xs leading-5 text-[#60766f]">Choose an example to fill the form, then adjust anything you like.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800" onClick={() => applyTemplate("highlands")}>3-day hill country</button>
-          <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800" onClick={() => applyTemplate("culture")}>4-day cultural trip</button>
-          <button type="button" className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800" onClick={() => applyTemplate("beach")}>Relaxed beach break</button>
+          <button type="button" className="rounded-xl border border-[#17453a]/15 bg-white px-3 py-2.5 text-xs font-bold text-[#31574c] transition hover:border-[#17453a]/30 hover:bg-[#f9fbf8]" onClick={() => applyTemplate("highlands")}>3-day hill country</button>
+          <button type="button" className="rounded-xl border border-[#17453a]/15 bg-white px-3 py-2.5 text-xs font-bold text-[#31574c] transition hover:border-[#17453a]/30 hover:bg-[#f9fbf8]" onClick={() => applyTemplate("culture")}>4-day cultural trip</button>
+          <button type="button" className="rounded-xl border border-[#17453a]/15 bg-white px-3 py-2.5 text-xs font-bold text-[#31574c] transition hover:border-[#17453a]/30 hover:bg-[#f9fbf8]" onClick={() => applyTemplate("beach")}>Relaxed beach break</button>
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div>
+        <p className="mb-4 text-xs font-extrabold tracking-[0.12em] text-[#789087]">ROUTE & DATES</p>
+        <div className="grid gap-4 md:grid-cols-2">
         <Field label="Start location" error={form.formState.errors.start_location?.message}>
           <input className={inputClass} placeholder="e.g. Colombo" {...form.register("start_location")} />
         </Field>
@@ -91,6 +93,11 @@ export function TripForm({ onSubmit }: { onSubmit: (values: TripFormValues) => P
             {...form.register("end_date")}
           />
         </Field>
+        </div>
+      </div>
+      <div>
+        <p className="mb-4 text-xs font-extrabold tracking-[0.12em] text-[#789087]">BUDGET & TRAVEL STYLE</p>
+        <div className="grid gap-4 md:grid-cols-2">
         <Field label="Budget min LKR" error={form.formState.errors.budget_min?.message}>
           <input
             className={inputClass}
@@ -132,9 +139,10 @@ export function TripForm({ onSubmit }: { onSubmit: (values: TripFormValues) => P
             <option value="mixed">Mixed</option>
           </select>
         </Field>
+        </div>
       </div>
-      <Button disabled={form.formState.isSubmitting} type="submit">
-        <MapPinned className="h-4 w-4" /> Create trip
+      <Button className="w-full sm:w-auto sm:justify-self-end" disabled={form.formState.isSubmitting} type="submit">
+        <MapPinned className="h-4 w-4" /> Create my trip
       </Button>
     </form>
   );

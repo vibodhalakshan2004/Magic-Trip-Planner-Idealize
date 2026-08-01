@@ -7,11 +7,11 @@ export function ApiErrorAlert({ error, onRetry }: { error?: unknown; onRetry?: (
   const status = error instanceof ApiError ? error.status : undefined;
   const message = friendlyMessage(error);
   return (
-    <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+    <div className="rounded-xl border border-[#e7bdb4] bg-[#fff2ee] p-4 text-sm text-[#7c3529]" role="alert">
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-bold">{status ? `Request failed (${status})` : "Request failed"}</p>
+          <p className="font-extrabold">{status ? `We couldn’t complete that (${status})` : "We couldn’t complete that"}</p>
           <p className="mt-1 break-words">{message}</p>
           {onRetry ? (
             <Button className="mt-3" variant="secondary" type="button" onClick={onRetry}>
