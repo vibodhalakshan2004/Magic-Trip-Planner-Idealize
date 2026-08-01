@@ -3,12 +3,12 @@ import Link from "next/link";
 
 export function LogoBrand({ compact = false }: { compact?: boolean }) {
   return (
-    <Link href="/" className="flex items-center gap-3">
-      <Image src="/logo.png" alt="MagicTripPlanner logo" width={44} height={44} className="h-11 w-11 rounded-md object-contain" priority />
+    <Link href="/" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#d5e8dc]">
+      <Image src="/logo.png" alt="" width={42} height={42} className="h-10 w-10 rounded-xl object-contain" priority />
       {!compact ? (
         <div className="leading-tight">
-          <p className="text-base font-black tracking-normal text-slate-950">MagicTripPlanner</p>
-          <p className="text-xs font-medium text-slate-500">Sri Lanka itinerary studio</p>
+          <p className="text-[15px] font-extrabold tracking-[-0.02em] text-[#123c32]">Magic Trip Planner</p>
+          <p className="text-[11px] font-semibold tracking-wide text-[#789087]">MADE FOR SRI LANKA</p>
         </div>
       ) : null}
     </Link>

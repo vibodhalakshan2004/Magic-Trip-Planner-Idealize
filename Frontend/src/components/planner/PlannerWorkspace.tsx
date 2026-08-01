@@ -150,16 +150,24 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
   return (
     <AppShell>
       {!authHydrated ? <LoadingState title="Restoring your session" description="Checking your saved login before opening the planner." /> : null}
-      <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+      <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <h1 className="text-3xl font-black text-slate-950">Planner</h1>
-          <p className="mt-2 text-slate-500">{store.trip ? `${store.trip.start_location} to ${store.trip.destination}` : "Create a trip to start the guided workflow."}</p>
+          <p className="text-xs font-extrabold tracking-[0.15em] text-[#d56535]">ITINERARY BUILDER</p>
+          <h1 className="mt-2 font-[family-name:var(--font-display)] text-4xl tracking-[-0.03em] text-[#123c32] sm:text-5xl">
+            {store.trip ? store.trip.destination : "Where are you heading?"}
+          </h1>
+          <p className="mt-2 text-[#60766f]">{store.trip ? `Starting in ${store.trip.start_location}` : "Start with the essentials. You can refine every detail afterwards."}</p>
         </div>
-        {store.trip ? <div className="rounded-md bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">{money(store.trip.budget_min)} - {money(store.trip.budget_max)}</div> : null}
+        {store.trip ? (
+          <div className="rounded-xl border border-[#17453a]/10 bg-white px-4 py-3 shadow-[0_6px_20px_rgba(18,60,50,.04)]">
+            <p className="text-[10px] font-extrabold tracking-wider text-[#789087]">PLANNED BUDGET</p>
+            <p className="mt-0.5 text-sm font-extrabold text-[#173e34]">{money(store.trip.budget_min)} – {money(store.trip.budget_max)}</p>
+          </div>
+        ) : null}
       </div>
-      {toast ? <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{toast}</div> : null}
+      {toast ? <div role="status" className="mb-4 rounded-xl border border-[#b9d7c5] bg-[#e9f4ed] p-3.5 text-sm font-bold text-[#19503f]">{toast}</div> : null}
       {store.trip ? <div className="mb-5 grid gap-3"><AutoPlanner tripId={store.trip.id} onComplete={async () => { await restore(store.trip!.id); setToast("Your complete plan is ready"); }} onError={setError} /><div className="grid gap-3 xl:grid-cols-2"><VersionHistory tripId={store.trip.id} onRestored={async () => { await restore(store.trip!.id); setToast("Trip version restored"); }} onError={setError} /><ShareTrip tripId={store.trip.id} onError={setError} /></div></div> : null}
-      <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
         <PlannerStepper steps={steps} active={active} onSelect={(id) => setActive(id as StepId)} />
         <div className="grid gap-4">
           <ApiErrorAlert error={error} onRetry={() => setError(undefined)} />
@@ -180,12 +188,12 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
       case "trip":
         return <Panel title="Trip setup" copy="Start with the route shape. Destination suggestions, hotels, route, and budget all attach to this trip."><TripForm onSubmit={async (values: TripFormValues) => run("trip", async () => { store.reset(); const trip = await tripApi.createTrip(values); store.setTrip(trip); setToast("Trip created"); setActive("places"); router.replace(`/planner/${trip.id}`); })} /></Panel>;
       case "places":
-        return <Panel title="Generate destination suggestions" copy="Ask the AI planner for Sri Lanka-aware places, then choose what belongs in your trip."><GeneratePlaces onGenerate={(payload) => runWithPreference(async (useSaved) => { const response = await destinationApi.suggestPlaces(store.trip!.id, { ...payload, use_saved_preferences: useSaved }); store.setDestination(response); setToast("Destination ideas generated"); setActive("place-select"); })} busy={busy === "places"} /></Panel>;
+        return <Panel title="Find places for your trip" copy="Share what you enjoy and we’ll suggest Sri Lanka stops that fit your route, pace, and budget."><GeneratePlaces onGenerate={(payload) => runWithPreference(async (useSaved) => { const response = await destinationApi.suggestPlaces(store.trip!.id, { ...payload, use_saved_preferences: useSaved }); store.setDestination(response); setToast("Destination ideas are ready"); setActive("place-select"); })} busy={busy === "places"} /></Panel>;
       case "place-select":
         return <Panel title="Select places" copy={store.destinationSummary || "Choose from generated suggestions or add custom OpenStreetMap places."}><div className="grid gap-5 xl:grid-cols-[1fr_320px]"><div className="grid gap-4"><PlaceSearchCombobox tripId={store.trip!.id} onAdd={choosePlace} /><div className="grid gap-4 md:grid-cols-2">{store.suggestedPlaces.map((place, index) => <PlaceSuggestionCard key={`${placeIdentity(place)}-${index}`} place={place} selected={store.selectedPlaces.some((p) => placeIdentity(p) === placeIdentity(place))} onToggle={choosePlace} />)}</div></div><div className="grid content-start gap-3"><SelectedPlacesPanel places={store.selectedPlaces} onRemove={(key) => store.setSelectedPlaces(store.selectedPlaces.filter((p) => p.place_key !== key))} /><Button disabled={busy === "save-places"} onClick={savePlaces}>Save selected places</Button></div></div></Panel>;
       case "route":
         return (
-          <Panel title="Route map" copy={store.routePlan ? "Your AI-optimised route is ready. Customise stop order and timing, then recalculate." : "Generate a day-by-day route. The AI will automatically pick the optimal order and timing for your places."}>
+          <Panel title="Build your daily route" copy={store.routePlan ? "Your route is ready. Adjust the stop order or timing, then recalculate when it feels right." : "Turn your selected places into a practical day-by-day route with travel time included."}>
             <RouteSection
               tripId={store.trip?.id}
               places={store.selectedPlaces}
@@ -265,7 +273,13 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
 }
 
 function Panel({ title, copy, children }: { title: string; copy: string; children: React.ReactNode }) {
-  return <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-2xl font-black text-slate-950">{title}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{copy}</p><div className="mt-5">{children}</div></section>;
+  return (
+    <section className="rounded-2xl border border-[#17453a]/10 bg-white p-5 shadow-[0_8px_30px_rgba(18,60,50,.04)] sm:p-7">
+      <h2 className="text-2xl font-extrabold tracking-[-0.025em] text-[#173e34]">{title}</h2>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-[#60766f]">{copy}</p>
+      <div className="mt-6">{children}</div>
+    </section>
+  );
 }
 
 function GeneratePlaces({ onGenerate, busy }: { onGenerate: (payload: { interests: string[]; trip_style: string; special_notes: string }) => void; busy: boolean }) {
