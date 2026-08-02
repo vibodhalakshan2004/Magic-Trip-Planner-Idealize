@@ -1,4 +1,4 @@
-import { json, request } from "./client";
+import { json, request, requestBlob } from "./client";
 import type { TokenResponse, User } from "./types";
 
 export const register = (body: { name: string; email: string; password: string }) =>
@@ -17,3 +17,13 @@ export async function login(email: string, password: string) {
 
 export const me = () => request<User>("/auth/me");
 export const logout = () => request<{ message: string }>("/auth/logout", { method: "POST" });
+export const updateProfile = (body: { name?: string; email?: string }) => json<User>("/auth/me", "PATCH", body);
+export const updatePassword = (body: { current_password: string; new_password: string }) =>
+  json<{ message: string }>("/auth/me/password", "PUT", body);
+export const uploadProfilePicture = (picture: File) => {
+  const form = new FormData();
+  form.set("picture", picture);
+  return request<User>("/auth/me/profile-picture", { method: "PUT", body: form });
+};
+export const deleteProfilePicture = () => request<User>("/auth/me/profile-picture", { method: "DELETE" });
+export const profilePicture = (version: string) => requestBlob(`/auth/me/profile-picture?v=${encodeURIComponent(version)}`);

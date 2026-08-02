@@ -117,16 +117,11 @@ class DestinationAgent:
         return f"{place.name}, {trip.destination}, Sri Lanka"
 
     def _place_queries(self, place: Any, trip: Any) -> list[str]:
-        queries = []
-        if getattr(place, "search_query", None):
-            queries.append(place.search_query)
-        queries.extend(
-            [
-                f"{place.name}, {trip.destination}, Sri Lanka",
-                f"{place.name}, Sri Lanka",
-            ]
+        return self.geocoder.place_queries(
+            name=place.name,
+            destination=trip.destination,
+            search_query=getattr(place, "search_query", None),
         )
-        return list(dict.fromkeys(query for query in queries if query))
 
     def _adjust_priority_for_weather(self, place: Any, weather_warnings: list[str]) -> int:
         priority_score = int(getattr(place, "priority_score", 5) or 5)
@@ -256,6 +251,11 @@ class DestinationAgent:
                 )
 
                 if not geocoded:
+                    warning = (
+                        "Map location could not be verified. Use place search to add a routable map result."
+                    )
+                    if warning not in place.warnings:
+                        place.warnings.append(warning)
                     continue
 
                 place.latitude = geocoded.get("latitude")
@@ -339,6 +339,8 @@ Rules:
 - Avoid over-prioritizing weather-sensitive outdoor stops when indoor or flexible alternatives fit the same interests.
 - search_query must contain only the canonical place name and Sri Lanka.
 - Do not put ticket, price, cost, booking, history, entrance fee, or activity intent words in search_query.
+- Recommend named, real map locations only. Do not invent generic activities, walks, tours, or unnamed viewpoints.
+- Use the attraction's canonical map listing name rather than a descriptive marketing name.
 
 Trip data:
 {json.dumps(trip_data, ensure_ascii=False, indent=2)}

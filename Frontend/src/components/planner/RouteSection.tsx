@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
 import { RouteMap } from "@/components/planner/RouteMap";
 import type { Hotel, ManualRouteStop, Place, RouteDay, RoutePlan, RouteSegment, RouteStop } from "@/lib/api/types";
-import { dayLabel, minutes } from "@/lib/utils/format";
+import { dayLabel, money, minutes } from "@/lib/utils/format";
 
 export function RouteSection({
   tripId,
@@ -18,6 +18,7 @@ export function RouteSection({
   onGenerate,
   onConfirm,
   onNext,
+  nextLabel = "Next: Daily hotels",
   busy,
 }: {
   tripId?: string;
@@ -29,6 +30,7 @@ export function RouteSection({
   onGenerate: (body: { day_start_time: string; return_to_start_location?: boolean; return_to_hotel?: boolean; include_hotels?: boolean; manual_schedule?: ManualRouteStop[] }) => void;
   onConfirm: () => void;
   onNext: () => void;
+  nextLabel?: string;
   busy: boolean;
 }) {
   const [customising, setCustomising] = useState(false);
@@ -43,9 +45,10 @@ export function RouteSection({
         <div>
           <p className="text-sm font-bold text-emerald-800">
             <Sparkles className="mr-1 inline h-4 w-4" />
-            Optimised route · {route.total_distance_km ?? 0} km · {minutes(route.total_travel_time_minutes)} · {confirmed ? "Confirmed" : "Draft"}
+            Optimised route · {route.total_distance_km ?? 0} km · {minutes(route.total_travel_time_minutes)} · {money(route.total_transport_cost_lkr ?? 0)} transport · {confirmed ? "Confirmed" : "Draft"}
           </p>
           {route.summary ? <p className="mt-1 text-xs text-emerald-700">{route.summary}</p> : null}
+          <p className="mt-1 text-xs text-emerald-700">Public bus and train tickets are priced per traveler for each origin-to-destination leg. Private vehicle costs are shared by the group.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" type="button" onClick={() => setCustomising((value) => !value)}>
@@ -77,7 +80,7 @@ export function RouteSection({
 
       <div className="flex flex-wrap gap-2">
         {!confirmed ? <Button disabled={busy} onClick={onConfirm}>Confirm route</Button> : null}
-        <Button disabled={!confirmed} onClick={onNext}>Next: Daily hotels</Button>
+        <Button disabled={!confirmed} onClick={onNext}>{nextLabel}</Button>
       </div>
     </div>
   );
@@ -283,7 +286,7 @@ function ItineraryTimeline({ days, activeStop, onSelectStop }: { days: RouteDay[
         <section key={day.day_number} className="rounded-md border border-slate-200 bg-white p-4">
           <h3 className="font-black text-slate-950">{dayLabel(day.day_number, day.date, day.start_time)}</h3>
           <p className="mt-1 text-sm text-slate-500">
-            {day.start_point_name} to {day.end_point_name} - {day.day_distance_km ?? 0} km - {minutes(day.day_travel_time_minutes)}
+            {day.start_point_name} to {day.end_point_name} - {day.day_distance_km ?? 0} km - {minutes(day.day_travel_time_minutes)} - {money(day.day_transport_cost_lkr ?? 0)}
           </p>
           <div className="mt-4 grid gap-2">
             {day.stops.map((stop, index) => (
@@ -324,6 +327,12 @@ function TurnByTurnDirections({ segments }: { segments: RouteSegment[] }) {
             </button>
             {isOpen ? (
               <ol className="grid gap-2 border-t border-slate-200 p-3 text-sm text-slate-600">
+                <li className="rounded bg-emerald-50 p-2 text-emerald-900">
+                  <b>{money(segment.transport_cost_lkr ?? 0)}</b>
+                  {segment.fare_per_person_lkr != null ? ` = ${money(segment.fare_per_person_lkr)} per traveler x ${segment.passenger_count ?? 1}` : " for the group"}
+                  {segment.transport_cost_source ? ` - ${segment.transport_cost_source}` : ""}
+                  {segment.fare_is_live ? " (live fare)" : ""}
+                </li>
                 {segment.instructions?.length ? segment.instructions.map((step, stepIndex) => <li key={stepIndex}>{step.instruction} <span className="text-xs text-slate-400">({step.distance_km ?? 0} km)</span></li>) : <li>No turn-by-turn instructions for this segment.</li>}
               </ol>
             ) : null}

@@ -18,6 +18,7 @@ from app.schemas.route import (
     SavedRoutePlanResponse,
 )
 from app.services.trip_access import require_trip_access
+from app.services.transport_cost import reprice_saved_route_transport
 
 router = APIRouter(
     prefix="/routes",
@@ -25,6 +26,32 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _repriced_route_response(route_plan: RoutePlan, trip) -> dict:
+    repriced = reprice_saved_route_transport(
+        route_plan=route_plan,
+        transport_type=trip.transport_type,
+        travelers=trip.travelers,
+    )
+    days = route_plan.days
+    total_transport_cost_lkr = getattr(route_plan, "total_transport_cost_lkr", 0) or 0
+    if repriced is not None:
+        days, estimate = repriced
+        total_transport_cost_lkr = estimate.total_lkr
+
+    return {
+        "id": route_plan.id,
+        "trip_id": route_plan.trip_id,
+        "total_distance_km": route_plan.total_distance_km,
+        "total_travel_time_minutes": route_plan.total_travel_time_minutes,
+        "total_transport_cost_lkr": total_transport_cost_lkr,
+        "route_status": getattr(route_plan, "route_status", "draft"),
+        "map_provider": getattr(route_plan, "map_provider", None),
+        "summary": getattr(route_plan, "summary", None),
+        "full_encoded_polyline": route_plan.full_encoded_polyline,
+        "days": days,
+    }
 
 
 @router.post(
@@ -138,7 +165,7 @@ def confirm_latest_route_for_trip(
     db.commit()
     db.refresh(route_plan)
 
-    return route_plan
+    return _repriced_route_response(route_plan, trip)
 
 
 @router.get(
@@ -165,4 +192,4 @@ def get_latest_route_for_trip(
             detail="Route plan not found",
         )
 
-    return route_plan
+    return _repriced_route_response(route_plan, trip)

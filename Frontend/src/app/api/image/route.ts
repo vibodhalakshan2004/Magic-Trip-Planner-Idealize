@@ -1,7 +1,11 @@
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
+// Wikimedia currently serves a fixed set of thumbnail buckets. 1280px is
+// accepted broadly; arbitrary widths such as 1600px return HTTP 400.
+const WIKIMEDIA_IMAGE_WIDTH = 1280;
 const WIKIMEDIA_SEARCH_URL = "https://commons.wikimedia.org/w/api.php";
 const ALLOWED_HOSTS = new Set([
   "upload.wikimedia.org",
@@ -13,6 +17,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const rawUrl = searchParams.get("url");
   const query = searchParams.get("query")?.trim();
+  const fallbackQuery = searchParams.get("fallbackQuery")?.trim();
   const label = searchParams.get("label")?.trim() || "Image unavailable";
 
   let url: URL | null = null;
@@ -24,47 +29,63 @@ export async function GET(request: Request) {
       return placeholder(label);
     }
   } else if (query) {
-    url = await findWikimediaImage(query);
+    url = null;
   } else {
     return placeholder(label);
   }
 
-  if (!url || !isAllowedImageUrl(url)) {
+  if (url && !isAllowedImageUrl(url)) {
     return placeholder(label);
   }
 
+  // Always try a saved source first. This avoids an extra API lookup for the
+  // normal case and lets old 3840px Wikimedia URLs use the optimized variant.
+  if (url) {
+    for (const candidate of uniqueUrls([optimizeWikimediaUrl(url), url])) {
+      const response = await proxyImage(candidate);
+      if (response) return response;
+    }
+  }
+
+  // Missing, expired, or unavailable sources use a layered Commons resolver:
+  // exact place name first, then a Sri Lanka-specific representative theme.
+  for (const lookupQuery of uniqueStrings([query, label, fallbackQuery])) {
+    const lookupUrl = await findWikimediaImage(lookupQuery);
+    if (!lookupUrl) continue;
+
+    for (const candidate of uniqueUrls([optimizeWikimediaUrl(lookupUrl), lookupUrl])) {
+      const response = await proxyImage(candidate);
+      if (response) return response;
+    }
+  }
+
+  return placeholder(label);
+}
+
+async function proxyImage(url: URL) {
   try {
     const upstream = await fetchImage(url);
-
-    if (!upstream?.ok || !upstream.body) {
-      return placeholder(label);
-    }
+    if (!upstream?.ok || !upstream.body) return null;
 
     const contentType = upstream.headers.get("content-type") ?? "image/jpeg";
-    if (!contentType.startsWith("image/")) {
-      return placeholder(label);
-    }
+    if (!contentType.startsWith("image/")) return null;
 
     const declaredLength = Number(upstream.headers.get("content-length") ?? 0);
-    if (declaredLength > MAX_IMAGE_BYTES) {
-      return placeholder(label);
-    }
+    if (declaredLength > MAX_IMAGE_BYTES) return null;
 
     const image = await readWithLimit(upstream.body, MAX_IMAGE_BYTES);
-    if (!image) {
-      return placeholder(label);
-    }
+    if (!image) return null;
 
     return new Response(image, {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=43200",
+        "Cache-Control": "public, max-age=43200, stale-while-revalidate=86400",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "X-Content-Type-Options": "nosniff",
       },
     });
   } catch {
-    return placeholder(label);
+    return null;
   }
 }
 
@@ -134,6 +155,42 @@ function isAllowedImageUrl(url: URL) {
   );
 }
 
+function optimizeWikimediaUrl(url: URL) {
+  if (url.hostname.toLowerCase() !== "upload.wikimedia.org") return url;
+
+  const optimized = new URL(url);
+  const match = optimized.pathname.match(/\/(\d+)px-([^/]+)$/i);
+  if (!match || Number(match[1]) <= WIKIMEDIA_IMAGE_WIDTH) return optimized;
+
+  optimized.pathname = optimized.pathname.replace(
+    /\/\d+px-([^/]+)$/i,
+    `/${WIKIMEDIA_IMAGE_WIDTH}px-$1`,
+  );
+  return optimized;
+}
+
+function uniqueUrls(urls: URL[]) {
+  const seen = new Set<string>();
+  return urls.filter((url) => {
+    const key = url.toString();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  return values.flatMap((value) => {
+    const cleaned = value?.trim();
+    if (!cleaned) return [];
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [cleaned];
+  });
+}
+
 async function fetchImage(initialUrl: URL) {
   let url = initialUrl;
 
@@ -145,7 +202,10 @@ async function fetchImage(initialUrl: URL) {
       },
       redirect: "manual",
       signal: AbortSignal.timeout(10_000),
-      next: { revalidate: 60 * 60 * 12 },
+      // Keep image bodies out of Next's incremental fetch cache. Large
+      // Wikimedia originals can exceed that cache's per-entry limit even
+      // though they are safely below this proxy's own 10 MB limit.
+      cache: "no-store",
     });
 
     if (![301, 302, 303, 307, 308].includes(response.status)) {
@@ -192,7 +252,10 @@ function placeholder(label: string) {
   return new Response(svg, {
     headers: {
       "Content-Type": "image/svg+xml",
-      "Cache-Control": "public, max-age=3600",
+      // A placeholder can be caused by a transient upstream timeout. Never
+      // cache it, otherwise the browser keeps showing the fallback even after
+      // the real image becomes available.
+      "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'none'; sandbox",
       "X-Content-Type-Options": "nosniff",
     },

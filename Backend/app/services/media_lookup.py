@@ -55,7 +55,10 @@ class MediaLookupService:
             except Exception:
                 continue
 
-            image = summary.get("originalimage") or summary.get("thumbnail") or {}
+            # Summary originals are often multi-megabyte, 3000-6000px photos.
+            # The summary thumbnail is large enough for a planner card and is
+            # much more reliable on slower/mobile connections.
+            image = summary.get("thumbnail") or summary.get("originalimage") or {}
             description = summary.get("extract") or summary.get("description")
             image_url = image.get("source")
 
@@ -69,6 +72,13 @@ class MediaLookupService:
                 }
 
         image_url = self._search_commons_image(normalized_query)
+
+        if not image_url:
+            for representative_query in self._representative_queries(normalized_query):
+                image_url = self._search_commons_image(representative_query)
+
+                if image_url:
+                    break
 
         return {
             "image_url": image_url,
@@ -103,6 +113,35 @@ class MediaLookupService:
                 unique_variants.append(cleaned_variant)
 
         return unique_variants
+
+    def _representative_queries(self, query: str) -> list[str]:
+        text = query.lower()
+        themes = [
+            (r"\btea\b|plantation|estate", "tea estate Sri Lanka"),
+            (r"beach|coast|bay|ocean|\bsea\b", "beach Sri Lanka"),
+            (r"waterfall|\bfalls\b", "waterfall Sri Lanka"),
+            (
+                r"temple|vihara|kovil|mosque|church|shrine|buddha",
+                "temple Sri Lanka",
+            ),
+            (r"fort|heritage|historical|colonial", "heritage site Sri Lanka"),
+            (
+                r"sanctuary|forest|jungle|national park|wildlife",
+                "nature reserve Sri Lanka",
+            ),
+            (r"garden|botanical", "botanical garden Sri Lanka"),
+            (r"lake|lagoon|river|reservoir", "lake Sri Lanka"),
+            (
+                r"mountain|hill|peak|viewpoint|rock",
+                "mountain landscape Sri Lanka",
+            ),
+            (r"museum|gallery", "museum Sri Lanka"),
+            (r"lighthouse", "lighthouse Sri Lanka"),
+            (r"market|shopping|bazaar", "market Sri Lanka"),
+            (r"food|restaurant|cuisine", "Sri Lankan cuisine"),
+        ]
+
+        return [fallback for pattern, fallback in themes if re.search(pattern, text)]
 
     def _search_title(self, query: str) -> str | None:
         results = map_http_client.get_json(
@@ -173,6 +212,7 @@ class MediaLookupService:
                     "gsrlimit": 3,
                     "prop": "imageinfo",
                     "iiprop": "url|mime",
+                    "iiurlwidth": 1200,
                 },
                 headers={"User-Agent": self.USER_AGENT},
                 timeout=15,
@@ -194,7 +234,7 @@ class MediaLookupService:
 
             image_info = image_infos[0]
             mime_type = image_info.get("mime") or ""
-            image_url = image_info.get("url")
+            image_url = image_info.get("thumburl") or image_info.get("url")
 
             if image_url and mime_type.startswith("image/"):
                 return image_url

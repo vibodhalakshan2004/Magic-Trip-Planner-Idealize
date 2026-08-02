@@ -1,12 +1,13 @@
 "use client";
 
-import { LayoutDashboard, LogIn, LogOut, Map, Menu, MessageSquareText, Plus, X } from "lucide-react";
+import { LayoutDashboard, LogIn, LogOut, Map, Menu, MessageSquareText, Plus, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { LogoBrand } from "@/components/LogoBrand";
+import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { usePlannerStore } from "@/lib/store/planner-store";
 import * as authApi from "@/lib/api/auth";
@@ -16,6 +17,7 @@ const navigation = [
   { href: "/dashboard", label: "My trips", icon: LayoutDashboard },
   { href: "/planner/new", label: "Plan a trip", icon: Map },
   { href: "/reviews", label: "Travel notes", icon: MessageSquareText },
+  { href: "/profile", label: "Profile", icon: UserRound },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -60,9 +62,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             {user ? (
               <>
-                <span className="hidden h-9 w-9 items-center justify-center rounded-full bg-[#e6efe9] text-sm font-bold text-[#17453a] sm:inline-flex" title={user.name}>
-                  {user.name.slice(0, 1).toUpperCase()}
-                </span>
+                <Link href="/profile" className="hidden rounded-full sm:inline-flex" aria-label={`Open ${user.name}'s profile`} title={user.name}>
+                  <ProfileAvatar user={user} className="h-9 w-9" />
+                </Link>
                 <Button className="hidden md:inline-flex" variant="ghost" aria-label="Log out" onClick={signOut}>
                   <LogOut className="h-4 w-4" />
                 </Button>

@@ -91,6 +91,9 @@ def provider_health():
             "places": bool(settings.GOOGLE_API_KEY and settings.GOOGLE_PLACES_ENABLED),
             "routes": bool(settings.GOOGLE_API_KEY and settings.GOOGLE_ROUTES_ENABLED),
             "geocoding": bool(settings.GOOGLE_API_KEY and settings.GOOGLE_GEOCODING_ENABLED),
+            "transit_fares": bool(
+                settings.GOOGLE_API_KEY and settings.GOOGLE_TRANSIT_FARES_ENABLED
+            ),
         },
         "usage": [
             {

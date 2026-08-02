@@ -1,17 +1,11 @@
-from sqlalchemy import Column
-from sqlalchemy import String
-from sqlalchemy import DateTime
-from sqlalchemy.orm import relationship
-
-from sqlalchemy.dialects.postgresql import UUID
-
-
 import uuid
-
 from datetime import datetime
 
-from app.core.database import Base
+from sqlalchemy import Column, DateTime, LargeBinary, String
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
+from app.core.database import Base
 
 
 class User(Base):
@@ -38,6 +32,26 @@ class User(Base):
     password_hash = Column(
         String,
         nullable=False
+    )
+
+    profile_picture = Column(
+        LargeBinary,
+        nullable=True,
+    )
+
+    profile_picture_content_type = Column(
+        String(50),
+        nullable=True,
+    )
+
+    profile_picture_version = Column(
+        String(64),
+        nullable=True,
+    )
+
+    profile_picture_updated_at = Column(
+        DateTime,
+        nullable=True,
     )
 
     created_at = Column(

@@ -26,16 +26,26 @@ export function ApiErrorAlert({ error, onRetry }: { error?: unknown; onRetry?: (
 
 function friendlyMessage(error: unknown) {
   if (error instanceof ApiError) {
-    if (error.status === 400) return "Please check the details and try again.";
+    const detailMessage =
+      typeof error.detail === "string"
+        ? error.detail
+        : error.detail && typeof error.detail === "object" && "message" in error.detail && typeof error.detail.message === "string"
+          ? error.detail.message
+          : null;
+    if (error.status === 400) return detailMessage ?? "Please check the details and try again.";
     if (error.status === 401) return "Your session has expired. Please log in again.";
     if (error.status === 404) return "We could not find that saved item yet.";
-    if (error.status === 409) return "Please choose whether to use your saved preferences.";
+    if (error.status === 409) return error.preferencePrompt ? "Please choose whether to use your saved preferences." : detailMessage ?? "That value is already in use.";
+    if (error.status === 413 || error.status === 415) return detailMessage ?? "The selected file could not be uploaded.";
     if (error.status === 422) {
       const detail = error.detail;
       if (Array.isArray(detail) && detail.length > 0) {
         return detail.map((d: { msg?: string }) => d.msg ?? "Invalid value").join("; ");
       }
-      return "Invalid input data. Please check your form values and try again.";
+      if (detail && typeof detail === "object" && "unresolved_places" in detail && Array.isArray(detail.unresolved_places)) {
+        return `${detailMessage ?? "Some places need a verified map location."} ${detail.unresolved_places.join(", ")}`;
+      }
+      return detailMessage ?? "Invalid input data. Please check your form values and try again.";
     }
     if (error.status === 500 || error.status === 502) return "The planner service had trouble completing this step. Please retry.";
     return "Something went wrong while contacting the planner service.";

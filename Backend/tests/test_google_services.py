@@ -122,3 +122,40 @@ def test_google_route_parser_returns_existing_route_contract(monkeypatch):
     assert result["duration_minutes"] == 30
     assert result["instructions"][0]["instruction"] == "Head east"
     assert result["path_coordinates"]
+
+
+def test_google_transit_fare_parser_returns_lkr_per_passenger(monkeypatch):
+    service = GoogleMapsService()
+    monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test-only-key")
+    monkeypatch.setattr(settings, "GOOGLE_TRANSIT_FARES_ENABLED", True)
+
+    monkeypatch.setattr(
+        map_http_client,
+        "post_json",
+        lambda *args, **kwargs: {
+            "routes": [
+                {
+                    "distanceMeters": 120000,
+                    "duration": "14400s",
+                    "travelAdvisory": {
+                        "transitFare": {
+                            "currencyCode": "LKR",
+                            "units": "620",
+                            "nanos": 500000000,
+                        }
+                    },
+                }
+            ]
+        },
+    )
+
+    result = service.transit_fare(
+        {"latitude": 6.9271, "longitude": 79.8612},
+        {"latitude": 7.2906, "longitude": 80.6337},
+        "bus",
+    )
+
+    assert result is not None
+    assert result["fare_lkr"] == 620.5
+    assert result["distance_km"] == 120
+    assert result["duration_minutes"] == 240

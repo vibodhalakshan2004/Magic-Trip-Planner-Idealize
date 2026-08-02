@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.schemas.destination import DestinationAgentResponse, SuggestedPlace
 from app.workers import planning_worker
@@ -53,6 +54,8 @@ def _place(index: int) -> SuggestedPlace:
         estimated_cost_lkr_per_person=0,
         priority_score=index,
         search_query=f"Place {index}, Sri Lanka",
+        latitude=6.8 + index / 100,
+        longitude=80.8 + index / 100,
     )
 
 
@@ -70,11 +73,14 @@ def test_full_plan_worker_reuses_existing_workflow_without_live_providers(monkey
         updated_at=None,
     )
     calls = []
+    unlocated = _place(4)
+    unlocated.latitude = None
+    unlocated.longitude = None
     destination = DestinationAgentResponse(
         trip_id=str(trip.id),
         destination="Ella",
         summary="Test",
-        suggested_places=[_place(1), _place(3), _place(2)],
+        suggested_places=[_place(1), unlocated, _place(3), _place(2)],
     )
 
     monkeypatch.setattr(planning_worker, "suggest_places_for_trip", lambda *args: destination)
@@ -92,6 +98,7 @@ def test_full_plan_worker_reuses_existing_workflow_without_live_providers(monkey
     assert result["selected_places"] == 3
     assert result["selected_hotel_days"] == []
     assert result["version_id"] == str(version_id)
+    assert result["skipped_unlocated_places"] == ["Place 4"]
     assert job.progress == 97
 
 
@@ -161,3 +168,19 @@ def test_failed_route_retry_reuses_saved_places_without_new_ai_call(monkeypatch)
     assert result["selected_places"] == 2
     assert result["resumed_from_saved_places"] is True
     assert job.progress == 97
+
+
+def test_worker_retries_when_database_is_temporarily_unavailable(monkeypatch, caplog):
+    def unavailable_session():
+        raise OperationalError("connect", {}, OSError("temporary DNS failure"))
+
+    def stop_after_retry(_seconds):
+        raise StopIteration
+
+    monkeypatch.setattr(planning_worker, "SessionLocal", unavailable_session)
+    monkeypatch.setattr(planning_worker.time, "sleep", stop_after_retry)
+
+    with pytest.raises(StopIteration):
+        planning_worker.run_forever()
+
+    assert "Database unavailable while polling" in caplog.text

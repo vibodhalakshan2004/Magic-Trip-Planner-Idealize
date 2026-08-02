@@ -2,6 +2,7 @@
 
 import L from "leaflet";
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
+import { useEffect } from "react";
 import type { Hotel, RouteDay, RouteStop } from "@/lib/api/types";
 import { minutes } from "@/lib/utils/format";
 
@@ -60,7 +61,40 @@ const hotelIconInstance = makeHotelIcon();
 
 function FocusMarker({ stop }: { stop: RouteStop | null }) {
   const map = useMap();
-  if (stop?.latitude && stop.longitude) map.flyTo([stop.latitude, stop.longitude], 14, { duration: 0.8 });
+  useEffect(() => {
+    if (stop?.latitude != null && stop.longitude != null) {
+      map.flyTo([stop.latitude, stop.longitude], 14, { duration: 0.8 });
+    }
+  }, [map, stop]);
+  return null;
+}
+
+function FitRouteBounds({ days, hotels }: { days: RouteDay[]; hotels: Hotel[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const routeCoordinates = days.flatMap((day) => {
+      if (day.day_path_coordinates?.length) return day.day_path_coordinates;
+      return day.segments.flatMap((segment) => segment.path_coordinates || []);
+    });
+    const hotelCoordinates = hotels
+      .filter((hotel) => hotel.latitude != null && hotel.longitude != null)
+      .map((hotel) => ({ latitude: hotel.latitude!, longitude: hotel.longitude! }));
+    const coordinates = [...routeCoordinates, ...hotelCoordinates].filter(
+      (point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude),
+    );
+
+    window.setTimeout(() => map.invalidateSize(), 0);
+    if (coordinates.length === 1) {
+      map.setView([coordinates[0].latitude, coordinates[0].longitude], 13);
+    } else if (coordinates.length > 1) {
+      map.fitBounds(
+        L.latLngBounds(coordinates.map((point) => [point.latitude, point.longitude])),
+        { padding: [36, 36], maxZoom: 13 },
+      );
+    }
+  }, [days, hotels, map]);
+
   return null;
 }
 
@@ -76,7 +110,7 @@ export default function RouteMapClient({
   onSelectStop: (stop: RouteStop) => void;
 }) {
   const allStops = days.flatMap((day) => (day.stops || []).map((s) => ({ ...s, dayNumber: day.day_number })));
-  const validStops = allStops.filter((s) => s.latitude && s.longitude);
+  const validStops = allStops.filter((stop) => stop.latitude != null && stop.longitude != null);
   const center: [number, number] =
     validStops[0]?.latitude && validStops[0]?.longitude
       ? [validStops[0].latitude, validStops[0].longitude]
@@ -88,6 +122,7 @@ export default function RouteMapClient({
         attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <FitRouteBounds days={days} hotels={hotels} />
       <FocusMarker stop={activeStop} />
 
       {/* Route polylines per day */}
@@ -152,7 +187,7 @@ export default function RouteMapClient({
 
       {/* Hotel markers */}
       {hotels
-        .filter((h) => h.latitude && h.longitude)
+        .filter((hotel) => hotel.latitude != null && hotel.longitude != null)
         .map((hotel) => (
           <Marker
             key={hotel.hotel_key || hotel.name}

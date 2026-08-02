@@ -46,6 +46,10 @@ class RouteSegment(BaseModel):
     distance_km: float
     duration_minutes: float
     transport_cost_lkr: float = 0
+    transport_cost_source: str = "Planning estimate"
+    fare_per_person_lkr: float | None = None
+    passenger_count: int = 1
+    fare_is_live: bool = False
 
     encoded_polyline: str
     path_coordinates: List[Coordinate]

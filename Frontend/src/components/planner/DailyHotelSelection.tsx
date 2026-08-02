@@ -35,6 +35,7 @@ export function DailyHotelSelection({
   const [suggestions, setSuggestions] = useState<Hotel[]>([]);
   const [busy, setBusy] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [goingHome, setGoingHome] = useState(false);
 
   const selectedByDay = useMemo(() => new Map(selectedHotels.filter((hotel) => hotel.day_number).map((hotel) => [hotel.day_number, hotel])), [selectedHotels]);
   const totalDays = Math.max(route.days.length, 1);
@@ -103,6 +104,7 @@ export function DailyHotelSelection({
             <Button variant="secondary" disabled={busy} onClick={() => run(async () => {
               await hotelApi.selectDailyHotel(tripId, activeDay, null, true);
               await refreshSelections();
+              setGoingHome(true);
             })}>
               <Home className="h-4 w-4" />
               Go directly home
@@ -133,6 +135,7 @@ export function DailyHotelSelection({
                 <Button className="mt-3 w-full" disabled={busy} onClick={() => run(async () => {
                   await hotelApi.selectDailyHotel(tripId, activeDay, hotel);
                   await refreshSelections();
+                  setGoingHome(false);
                 })}>Select for day {activeDay}</Button>
               </div>
             </div>
@@ -154,8 +157,14 @@ export function DailyHotelSelection({
         </div>
       ) : null}
 
+      {isLastDay && goingHome ? (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-900">
+          Day {activeDay} will finish with the route back to your trip start location.
+        </div>
+      ) : null}
+
       <div className="mt-4 flex gap-3">
-        <Button onClick={onNext} className="w-full">
+        <Button disabled={busy || (!currentSelection && !(isLastDay && goingHome))} onClick={onNext} className="w-full">
           {isLastDay ? "Review Final Route Map" : `Save & Go To Day ${activeDay + 1}`}
         </Button>
       </div>

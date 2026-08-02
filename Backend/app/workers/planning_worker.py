@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.routes.budget import calculate_budget_for_trip
@@ -28,6 +29,7 @@ from app.schemas.destination import DestinationSuggestRequest
 from app.schemas.hotel import DailyHotelSelectRequest, DailyHotelSuggestRequest
 from app.schemas.route import RoutePlanRequest
 from app.schemas.selected_place import SelectPlacesRequest
+from app.services.geocoder import GeocoderService
 from app.services.trip_versions import capture_trip_version
 
 logger = logging.getLogger("magictrip.worker")
@@ -64,6 +66,7 @@ def _run_full_plan(db: Session, job: PlanningJob) -> dict:
     )
 
     places = []
+    skipped_unlocated_places: list[str] = []
     if resume_route:
         places = db.query(SelectedPlace).filter(SelectedPlace.trip_id == trip.id).all()
         resume_route = bool(places)
@@ -82,11 +85,29 @@ def _run_full_plan(db: Session, job: PlanningJob) -> dict:
             user,
         )
         max_places = int(payload.get("max_places", 6))
-        places = sorted(
+        ranked_places = sorted(
             destination.suggested_places,
             key=lambda item: item.priority_score,
             reverse=True,
-        )[:max_places]
+        )
+        skipped_unlocated_places = [
+            item.name
+            for item in ranked_places
+            if not GeocoderService.valid_coordinate_pair(
+                item.latitude, item.longitude
+            )
+        ]
+        places = [
+            item
+            for item in ranked_places
+            if GeocoderService.valid_coordinate_pair(item.latitude, item.longitude)
+        ][:max_places]
+
+        if not places:
+            raise ValueError(
+                "No map-verified attractions were found for this destination. "
+                "Try again or add places from map search."
+            )
 
         _update(db, job, 25, "Saving the best-matched places")
         select_places_for_trip(
@@ -170,6 +191,7 @@ def _run_full_plan(db: Session, job: PlanningJob) -> dict:
         "budget_status": budget.budget_status,
         "version_id": str(version.id),
         "resumed_from_saved_places": resume_route,
+        "skipped_unlocated_places": skipped_unlocated_places,
     }
 
 
@@ -231,11 +253,17 @@ def run_forever() -> None:
     logging.basicConfig(level=logging.INFO)
     logger.info("Planning worker started")
     while True:
-        with SessionLocal() as db:
-            job = claim_next_job(db)
-            if job:
-                process_job(db, job)
-                continue
+        try:
+            with SessionLocal() as db:
+                job = claim_next_job(db)
+                if job:
+                    process_job(db, job)
+                    continue
+        except SQLAlchemyError as error:
+            logger.warning(
+                "Database unavailable while polling for planning jobs; retrying: %s",
+                error,
+            )
         time.sleep(settings.PLANNING_WORKER_POLL_SECONDS)
 
 
