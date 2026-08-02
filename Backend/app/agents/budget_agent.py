@@ -5,7 +5,10 @@ from app.schemas.budget import (
     BudgetBreakdownItem,
     BudgetCalculateRequest,
 )
-from app.services.transport_cost import estimate_transport_cost
+from app.services.transport_cost import (
+    estimate_saved_route_transport_cost,
+    estimate_transport_cost,
+)
 
 
 class BudgetAgent:
@@ -76,6 +79,41 @@ class BudgetAgent:
 
         return 7
 
+    def _route_segment_names(self, route_plan: Any | None) -> set[str]:
+        names: set[str] = set()
+
+        if route_plan is None:
+            return names
+
+        for day in list(getattr(route_plan, "days", None) or []):
+            segments = day.get("segments", []) if isinstance(day, dict) else getattr(day, "segments", [])
+            for segment in segments or []:
+                if isinstance(segment, dict):
+                    values = [segment.get("from_name"), segment.get("to_name")]
+                else:
+                    values = [getattr(segment, "from_name", None), getattr(segment, "to_name", None)]
+                for value in values:
+                    if value:
+                        names.add(" ".join(str(value).lower().split()))
+
+        return names
+
+    def _hotel_transfer_cost_not_in_route(
+        self,
+        selected_hotels: List[Any],
+        route_plan: Any | None,
+    ) -> float:
+        routed_names = self._route_segment_names(route_plan)
+        total = 0.0
+
+        for hotel in selected_hotels:
+            hotel_name = " ".join(str(getattr(hotel, "name", "")).lower().split())
+            if hotel_name and hotel_name in routed_names:
+                continue
+            total += float(getattr(hotel, "transfer_cost_lkr", 0) or 0)
+
+        return total
+
     def _get_budget_status(
         self,
         total_cost: float,
@@ -96,6 +134,7 @@ class BudgetAgent:
         hotel_cost: float,
         transport_cost: float,
         route_distance_km: float | None,
+        transport_source: str,
     ) -> List[str]:
         warnings = []
 
@@ -121,7 +160,7 @@ class BudgetAgent:
 
         if route_distance_km and route_distance_km > 0:
             warnings.append(
-                "Transport cost is based on the saved route distance and the selected transport type. Real-world fares can still vary."
+                f"Transport uses each saved origin-to-destination route leg. Source: {transport_source}. Real-world fares can still vary."
             )
         else:
             warnings.append(
@@ -183,15 +222,25 @@ class BudgetAgent:
         )
 
         route_distance_km = None
-        explicit_route_cost_lkr = None
+        route_transport_estimate = None
 
         if route_plan is not None:
             route_distance_km = getattr(route_plan, "total_distance_km", None)
-            explicit_route_cost_lkr = getattr(route_plan, "total_transport_cost_lkr", None)
+            route_transport_estimate = estimate_saved_route_transport_cost(
+                route_plan=route_plan,
+                transport_type=trip.transport_type,
+                travelers=travelers,
+            )
 
-        hotel_transfer_cost = sum(
-            float(getattr(hotel, "transfer_cost_lkr", 0) or 0)
-            for hotel in selected_hotels
+        hotel_transfer_cost = self._hotel_transfer_cost_not_in_route(
+            selected_hotels=selected_hotels,
+            route_plan=route_plan,
+        )
+
+        explicit_route_cost_lkr = (
+            route_transport_estimate.total_lkr
+            if route_transport_estimate is not None
+            else None
         )
 
         transport_cost = estimate_transport_cost(
@@ -201,6 +250,17 @@ class BudgetAgent:
             route_distance_km=route_distance_km,
             explicit_route_cost_lkr=explicit_route_cost_lkr,
         ) + hotel_transfer_cost
+        transport_source = (
+            route_transport_estimate.source
+            if route_transport_estimate is not None
+            else (
+                "selected transport fallback based on route distance"
+                if route_distance_km
+                else "fallback daily estimate because no route is saved"
+            )
+        )
+        if hotel_transfer_cost > 0:
+            transport_source += "; unrouted hotel transfer estimate included"
 
         other_cost = request.shopping_other_cost_lkr
 
@@ -251,8 +311,10 @@ class BudgetAgent:
             BudgetBreakdownItem(
                 category="transport",
                 description=(
-                    f"Estimated local transport cost based on {trip.transport_type} "
-                    f"and {'saved route distance' if route_distance_km else 'fallback daily estimates'}."
+                    f"{trip.transport_type.title()} cost calculated "
+                    f"{'per saved route leg' if route_distance_km else 'from a conservative daily fallback'}. "
+                    f"Public tickets are per person; private vehicle fares are per group. "
+                    f"Source: {transport_source}."
                 ),
                 amount_lkr=self._round_amount(transport_cost),
             ),
@@ -274,6 +336,7 @@ class BudgetAgent:
             hotel_cost=hotel_cost,
             transport_cost=transport_cost,
             route_distance_km=route_distance_km,
+            transport_source=transport_source,
         )
 
         suggestions = self._build_suggestions(

@@ -157,28 +157,26 @@ def get_latest_budget_for_trip(
             detail="Budget estimate not found",
         )
 
-    return {
-        "id": budget_estimate.id,
-        "trip_id": budget_estimate.trip_id,
-        "destination": trip.destination,
-        "days": budget_estimate.days,
-        "nights": budget_estimate.nights,
-        "travelers": budget_estimate.travelers,
-        "budget_min_lkr": budget_estimate.budget_min_lkr,
-        "budget_max_lkr": budget_estimate.budget_max_lkr,
-        "selected_places_cost_lkr": budget_estimate.selected_places_cost_lkr,
-        "hotel_cost_lkr": budget_estimate.hotel_cost_lkr,
-        "food_cost_lkr": budget_estimate.food_cost_lkr,
-        "transport_cost_lkr": budget_estimate.transport_cost_lkr,
-        "other_cost_lkr": budget_estimate.other_cost_lkr,
-        "subtotal_lkr": budget_estimate.subtotal_lkr,
-        "buffer_lkr": budget_estimate.buffer_lkr,
-        "total_estimated_cost_lkr": budget_estimate.total_estimated_cost_lkr,
-        "remaining_budget_lkr": budget_estimate.remaining_budget_lkr,
-        "over_budget_amount_lkr": budget_estimate.over_budget_amount_lkr,
-        "budget_status": budget_estimate.budget_status,
-        "breakdown": budget_estimate.breakdown,
-        "warnings": budget_estimate.warnings,
-        "suggestions": budget_estimate.suggestions,
-        "summary": budget_estimate.summary,
-    }
+    selected_places = db.query(SelectedPlace).filter(SelectedPlace.trip_id == trip.id).all()
+    selected_hotels = db.query(SelectedHotel).filter(SelectedHotel.trip_id == trip.id).all()
+    route_plan = (
+        db.query(RoutePlan)
+        .filter(
+            RoutePlan.trip_id == trip.id,
+            RoutePlan.route_status == "confirmed",
+        )
+        .order_by(RoutePlan.created_at.desc())
+        .first()
+    )
+    divisor = max(int(budget_estimate.days or 1), 1) * max(int(trip.travelers or 1), 1)
+    current = BudgetAgent().calculate_budget(
+        trip=trip,
+        selected_places=selected_places,
+        selected_hotels=selected_hotels,
+        request=BudgetCalculateRequest(
+            food_cost_per_person_per_day_lkr=float(budget_estimate.food_cost_lkr or 0) / divisor,
+            shopping_other_cost_lkr=float(budget_estimate.other_cost_lkr or 0),
+        ),
+        route_plan=route_plan,
+    )
+    return {"id": budget_estimate.id, **current.model_dump(mode="json")}

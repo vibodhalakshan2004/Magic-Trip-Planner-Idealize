@@ -54,21 +54,11 @@ def _coordinate_query(place, trip: Trip) -> str:
 
 
 def _coordinate_queries(place, trip: Trip) -> list[str]:
-    queries = []
-
-    if place.search_query:
-        queries.append(place.search_query)
-
-    queries.append(f"{place.name}, {trip.destination}, Sri Lanka")
-    queries.append(f"{place.name}, Sri Lanka")
-
-    unique_queries = []
-
-    for query in queries:
-        if query and query not in unique_queries:
-            unique_queries.append(query)
-
-    return unique_queries
+    return geocoder_service.place_queries(
+        name=place.name,
+        destination=trip.destination,
+        search_query=place.search_query,
+    )
 
 
 @router.post(
@@ -135,23 +125,50 @@ def select_places_for_trip(
 ):
     trip = require_trip_access(db, trip_id, current_user.id, write=True)
 
-    db.query(SelectedPlace).filter(
-        SelectedPlace.trip_id == trip.id
-    ).delete()
+    resolved_places = []
+    unresolved_places = []
 
-    selected_places = []
-
+    # Resolve the full request before replacing saved selections. This makes
+    # coordinates an invariant of SelectedPlace and prevents a later route
+    # generation failure from an AI label that was never matched to a map
+    # feature.
     for place in request.selected_places:
         latitude = place.latitude
         longitude = place.longitude
 
-        if latitude is None or longitude is None:
+        if not geocoder_service.valid_coordinate_pair(latitude, longitude):
             geocoded = geocoder_service.geocode_candidates(
                 _coordinate_queries(place, trip)
             )
             if geocoded:
                 latitude = geocoded.get("latitude")
                 longitude = geocoded.get("longitude")
+
+        if not geocoder_service.valid_coordinate_pair(latitude, longitude):
+            unresolved_places.append(place.name)
+            continue
+
+        resolved_places.append((place, float(latitude), float(longitude)))
+
+    if unresolved_places:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Some places do not have a verified map location. "
+                    "Add them from place search so the route uses the correct coordinates."
+                ),
+                "unresolved_places": unresolved_places,
+            },
+        )
+
+    db.query(SelectedPlace).filter(
+        SelectedPlace.trip_id == trip.id
+    ).delete()
+
+    selected_places = []
+
+    for place, latitude, longitude in resolved_places:
 
         weather_summary = place.weather_summary
         warnings = list(place.warnings)

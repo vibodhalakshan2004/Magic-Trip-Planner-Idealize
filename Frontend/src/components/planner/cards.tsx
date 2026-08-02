@@ -9,14 +9,18 @@ import { fallbackImage, money } from "@/lib/utils/format";
 import * as destinationApi from "@/lib/api/destination";
 import * as hotelApi from "@/lib/api/hotels";
 
-export function SmartImage({ src, alt, kind, className = "h-48 w-full object-cover" }: { src?: string | null; alt: string; kind: "place" | "hotel"; className?: string }) {
+const IMAGE_PROXY_VERSION = "3";
+
+export function SmartImage({ src, alt, kind, fallbackQuery, className = "h-48 w-full object-cover" }: { src?: string | null; alt: string; kind: "place" | "hotel"; fallbackQuery?: string; className?: string }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const imageSrc = useMemo(() => {
     const sourceKey = src ?? `lookup:${alt}`;
     if (failedSrc === sourceKey) return fallbackImage(alt, kind);
-    if (src) return `/api/image?url=${encodeURIComponent(src)}&label=${encodeURIComponent(alt)}`;
-    return `/api/image?query=${encodeURIComponent(alt)}&label=${encodeURIComponent(alt)}`;
-  }, [alt, failedSrc, kind, src]);
+    const representativeQuery = fallbackQuery?.trim() || (kind === "hotel" ? "Sri Lanka architecture" : "Sri Lanka landscape");
+    const sharedParams = `label=${encodeURIComponent(alt)}&fallbackQuery=${encodeURIComponent(representativeQuery)}&v=${IMAGE_PROXY_VERSION}`;
+    if (src) return `/api/image?url=${encodeURIComponent(src)}&${sharedParams}`;
+    return `/api/image?query=${encodeURIComponent(alt)}&${sharedParams}`;
+  }, [alt, failedSrc, fallbackQuery, kind, src]);
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -32,9 +36,10 @@ export function SmartImage({ src, alt, kind, className = "h-48 w-full object-cov
 }
 
 export function PlaceSuggestionCard({ place, selected, onToggle }: { place: Place; selected: boolean; onToggle: (place: Place) => void }) {
+  const routable = hasMapCoordinates(place);
   return (
     <article className={`overflow-hidden rounded-2xl border bg-white shadow-[0_6px_24px_rgba(18,60,50,.05)] transition ${selected ? "border-[#4f8877] ring-4 ring-[#dbece2]" : "border-[#17453a]/10 hover:-translate-y-0.5 hover:border-[#17453a]/20"}`}>
-      <SmartImage src={place.image_url} alt={place.name} kind="place" />
+      <SmartImage src={place.image_url} alt={place.name} kind="place" fallbackQuery={placePhotoFallbackQuery(place)} />
       <div className="grid gap-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -47,10 +52,13 @@ export function PlaceSuggestionCard({ place, selected, onToggle }: { place: Plac
         <div className="grid gap-1 text-xs text-slate-500">
           <span><Clock className="mr-1 inline h-3 w-3" />{place.best_time_to_visit || "Flexible"} · {place.estimated_visit_duration_hours ?? 1} hr</span>
           <span><MapPin className="mr-1 inline h-3 w-3" />{money(place.estimated_cost_lkr_per_person)} per person</span>
+          <span className={routable ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+            {routable ? "Map location verified" : "Map location unavailable — add this place through search instead"}
+          </span>
           {place.weather_summary ? <span>{place.weather_summary}</span> : null}
           {place.warnings?.length ? <span className="font-semibold text-amber-700">{place.warnings.join(", ")}</span> : null}
         </div>
-        <Button className="w-full" type="button" variant={selected ? "secondary" : "primary"} onClick={() => onToggle(place)}>{selected ? <><Check className="h-4 w-4" /> Added to trip</> : "Add to trip"}</Button>
+        <Button className="w-full" type="button" disabled={!routable && !selected} variant={selected ? "secondary" : "primary"} onClick={() => onToggle(place)}>{selected ? <><Check className="h-4 w-4" /> Added to trip</> : routable ? "Add to trip" : "Use place search"}</Button>
       </div>
     </article>
   );
@@ -90,7 +98,7 @@ export function PlaceSearchCombobox({ tripId, onAdd }: { tripId: string; onAdd: 
     const timer = window.setTimeout(() => destinationApi.searchPlaces(tripId, query).then((r) => setItems(r.suggestions)).catch(() => setItems([])), 350);
     return () => window.clearTimeout(timer);
   }, [query, tripId]);
-  const visibleItems = query.trim().length >= 2 ? uniqueBy(items, (place) => `${place.place_key || ""}|${place.name}|${place.latitude ?? ""}|${place.longitude ?? ""}`) : [];
+  const visibleItems = query.trim().length >= 2 ? uniqueBy(items.filter(hasMapCoordinates), (place) => `${place.place_key || ""}|${place.name}|${place.latitude ?? ""}|${place.longitude ?? ""}`) : [];
   return (
     <div className="rounded-2xl border border-[#17453a]/10 bg-[#f9faf7] p-4">
       <label className="relative block">
@@ -144,6 +152,33 @@ function uniqueBy<T>(items: T[], keyFor: (item: T) => string) {
     seen.add(key);
     return true;
   });
+}
+
+function hasMapCoordinates(place: Place) {
+  return Number.isFinite(place.latitude) && Number.isFinite(place.longitude);
+}
+
+function placePhotoFallbackQuery(place: Place) {
+  const text = `${place.name} ${place.category} ${place.short_description || ""}`.toLowerCase();
+  const themes: Array<[RegExp, string]> = [
+    [/\btea\b|plantation|estate/, "tea estate Sri Lanka"],
+    [/beach|coast|bay|ocean|sea\b/, "beach Sri Lanka"],
+    [/waterfall|\bfalls\b/, "waterfall Sri Lanka"],
+    [/temple|vihara|kovil|mosque|church|shrine|buddha/, "temple Sri Lanka"],
+    [/fort|heritage|historical|colonial/, "heritage site Sri Lanka"],
+    [/sanctuary|forest|jungle|national park|wildlife/, "nature reserve Sri Lanka"],
+    [/garden|botanical/, "botanical garden Sri Lanka"],
+    [/lake|lagoon|river|reservoir/, "lake Sri Lanka"],
+    [/mountain|hill|peak|viewpoint|rock/, "mountain landscape Sri Lanka"],
+    [/museum|gallery/, "museum Sri Lanka"],
+    [/lighthouse/, "lighthouse Sri Lanka"],
+    [/market|shopping|bazaar/, "market Sri Lanka"],
+    [/food|restaurant|cuisine/, "Sri Lankan cuisine"],
+    [/culture|cultural/, "culture Sri Lanka"],
+    [/adventure|hiking|surfing/, "outdoor travel Sri Lanka"],
+  ];
+
+  return themes.find(([pattern]) => pattern.test(text))?.[1] || "landscape Sri Lanka";
 }
 
 export function SelectedPlacesPanel({ places, onRemove }: { places: Place[]; onRemove: (key: string) => void }) {

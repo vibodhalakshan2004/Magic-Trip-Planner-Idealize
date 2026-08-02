@@ -21,7 +21,12 @@ export class ApiError extends Error {
   preferencePrompt?: SavedPreferencePrompt;
 
   constructor(status: number, detail: unknown) {
-    const message = typeof detail === "string" ? detail : "Request failed";
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string"
+          ? detail.message
+          : "Request failed";
     super(message);
     this.status = status;
     this.detail = detail;
@@ -49,7 +54,11 @@ async function parseResponse(response: Response) {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type") && !(init.body instanceof URLSearchParams)) {
+  const bodySetsContentType =
+    init.body instanceof URLSearchParams ||
+    (typeof FormData !== "undefined" && init.body instanceof FormData) ||
+    (typeof Blob !== "undefined" && init.body instanceof Blob);
+  if (init.body && !headers.has("Content-Type") && !bodySetsContentType) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(`${apiBaseUrl()}${path}`, { ...init, headers, credentials: "include" });
@@ -60,6 +69,17 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw new ApiError(response.status, detail);
   }
   return payload as T;
+}
+
+export async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl()}${path}`, { credentials: "include" });
+  if (!response.ok) {
+    const payload = await parseResponse(response);
+    const detail = payload && typeof payload === "object" && "detail" in payload ? (payload as { detail: unknown }).detail : payload;
+    if (response.status === 401) unauthorizedHandler?.();
+    throw new ApiError(response.status, detail);
+  }
+  return response.blob();
 }
 
 export const json = <T>(path: string, method: string, body?: unknown) =>

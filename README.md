@@ -11,13 +11,16 @@ MagicTripPlanner is an AI-assisted full-stack travel planner built with FastAPI,
 - Budget Agent aggregates places, hotels, food, transport, and buffer costs.
 
 ### Routing and map data
-- Nominatim geocoding and search for destinations, places, and hotels.
-- Selected places are auto-geocoded during save when coordinates are missing.
+- Layered OpenStreetMap geocoding through Nominatim, progressively broader canonical-name queries, and Photon fallback.
+- Selected places must have verified coordinates before they are saved or routed.
 - Wikipedia-based media enrichment adds best-effort thumbnail images for places and hotels.
-- Wikimedia Commons fallback image lookup is used when a Wikipedia summary has no usable image.
+- Location and hotel photos use a layered Wikimedia resolver: saved photos are
+  resized to reliable 1280px thumbnails, missing exact-name results fall back
+  to a Sri Lanka-specific visual theme derived from the place type, and only a
+  total upstream outage uses the local SVG placeholder.
 - OpenRouteService routing when `ORS_API_KEY` is configured.
 - Automatic fallback to public OSRM if OpenRouteService is unavailable.
-- Optional Google Routes, Places, and Geocoding adapters with automatic fallback to the existing providers.
+- Optional Google Routes, Places, Geocoding, and live transit-fare adapters with automatic fallback to the existing providers.
 - Google Weather daily forecasts with persistent application-side usage protection.
 - OpenWeather forecast enrichment for selected places when trip dates overlap available forecast data.
 - Route instructions, path coordinates, and encoded polylines for frontend map rendering.
@@ -42,7 +45,12 @@ MagicTripPlanner is an AI-assisted full-stack travel planner built with FastAPI,
 - Hotel totals are aggregated from the selected hotel records.
 - Place fees are aggregated from the selected place records.
 - Food cost is calculated per traveler per day.
-- Transport cost uses saved route distance when a route plan exists.
+- Transport is calculated for every saved origin-to-destination route leg instead of applying one flat trip-wide rate.
+- Bus and train fares are per passenger and multiplied by traveler count; car, taxi, motorcycle, and local mixed-mode vehicle costs are per group.
+- Public transport first requests a current Google transit fare for the exact endpoints when `GOOGLE_TRANSIT_FARES_ENABLED=true`. When Google has no complete fare, normal buses use the NTC fare-stage schedule effective 2026-07-06 and trains use the Sri Lanka Railways ordinary third-class zones.
+- Mixed transport uses public bus pricing for intercity legs and one tuk-tuk/local group-transfer estimate for short legs.
+- A hotel transfer is added separately only if that hotel is not already present in the saved route, preventing duplicate transport charges.
+- Saved routes are repriced from their individual segments, so an estimate generated under an older rate model is not reused blindly.
 - Fallback transport heuristics are used only when no route plan has been generated yet.
 - Automatic emergency buffer and budget status classification.
 
@@ -60,12 +68,14 @@ MagicTripPlanner is an AI-assisted full-stack travel planner built with FastAPI,
 - One-click full-plan jobs with durable progress, cancellation, idempotency, and a separate worker process.
 - Automatic and manual trip checkpoints with version restore.
 - Viewer/editor sharing with other registered MagicTripPlanner accounts.
+- Editable account profile with name, email, password, and validated profile-picture uploads.
 
 ### Reliability and security
 - HttpOnly, SameSite session cookies; bearer tokens remain accepted for API compatibility but are not stored by the frontend.
 - Configurable credentialed CORS, authentication/API rate limits, request IDs, response timing, and security headers.
 - Shared PostgreSQL provider cache and transaction-safe Google usage counters across backend and worker processes.
 - Database indexes for trip restore, planning jobs, selected places/hotels, routes, budgets, reviews, and version history.
+- Profile password changes require the current password; uploaded avatars are signature-checked and limited to 5 MB.
 
 ## Tech stack
 
@@ -119,6 +129,7 @@ GOOGLE_WEATHER_ENABLED=false
 GOOGLE_PLACES_ENABLED=false
 GOOGLE_ROUTES_ENABLED=false
 GOOGLE_GEOCODING_ENABLED=false
+GOOGLE_TRANSIT_FARES_ENABLED=false
 GOOGLE_WEATHER_MONTHLY_LIMIT=3000
 GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=1500
 GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=400
@@ -185,7 +196,7 @@ GOOGLE_ROUTES_ENABLED=false
 GOOGLE_GEOCODING_ENABLED=false
 ```
 
-Enable them only after migrating the mapped experience to Maps JavaScript API or after confirming that the relevant output is not displayed on the OSM map. Google Weather can be enabled independently after it is enabled in the same Google Cloud project. Repository defaults remain false and the non-Google providers continue as fallbacks.
+Enable them only after migrating the mapped experience to Maps JavaScript API or after confirming that the relevant output is not displayed on the OSM map. Google Weather and `GOOGLE_TRANSIT_FARES_ENABLED` can be enabled independently because they do not replace the displayed OSM map. Transit fare lookups use the existing quota-guarded Routes allowance and cache each endpoint pair for 15 minutes. Repository defaults remain false and the non-Google providers continue as fallbacks.
 
 ### Testing policy
 
@@ -268,7 +279,7 @@ alembic upgrade head
 
 If you already have an existing database created by an older version of the app, the baseline migration is written to be safe on an already-populated schema and will add missing pieces such as the `preferences.interests` column when needed.
 
-After pulling the latest changes, run migrations again so media/toolkit fields plus planning jobs, trip versions, collaborators, shared cache, quota counters, and performance indexes are added.
+After pulling the latest changes, run migrations again so media/toolkit fields plus planning jobs, trip versions, collaborators, shared cache, quota counters, performance indexes, and user profile-picture fields are added.
 
 ## Run the API
 
@@ -353,7 +364,7 @@ Useful restore/read endpoints for frontend refresh persistence:
 - `GET /preferences/choice-prompt` returns the saved preference snapshot so the frontend can ask the user whether to reuse it or collect fresh inputs.
 
 ### Selected places
-- `POST /destination/trips/{trip_id}/select-places` attempts to geocode missing coordinates before saving.
+- `POST /destination/trips/{trip_id}/select-places` resolves missing coordinates before changing saved selections and rejects unresolved items with their names.
 - The selected place response includes `weather_summary` when OpenWeather forecast data overlaps the trip dates.
 - The selected place response can now include `image_url` for frontend thumbnails.
 - Weather advisories are appended to the place `warnings` list for rain, thunderstorms, and hot outdoor conditions.
@@ -361,6 +372,8 @@ Useful restore/read endpoints for frontend refresh persistence:
 ### Destination suggestions
 - Destination suggestions are geocoded and weather-enriched after the Gemini response.
 - Suggestion payloads can now include `latitude`, `longitude`, `weather_summary`, and `image_url` before the user selects places.
+- Unverified AI labels cannot be selected directly; users can choose a coordinate-backed result from place search instead.
+- Automatic planning continues with map-verified suggestions instead of failing the whole job because one label is unresolved.
 - Weather-sensitive outdoor suggestions may be slightly deprioritized when the trip forecast is unfavorable.
 
 ### Hotel suggestions
@@ -373,16 +386,19 @@ Useful restore/read endpoints for frontend refresh persistence:
 - Daily routes begin from the trip `start_location` on day 1.
 - Subsequent days use hotel or destination fallback points.
 - Route ordering is optimized before calling the routing provider.
+- Hotel-inclusive routes visit each selected daily hotel, including hotel-only days, before the final journey back to the trip start location.
+- The frontend image proxy supports upstream images up to 10 MB without placing large image bodies in the Next.js fetch cache.
 
 ### External services
-- Nominatim search and geocoding now share one rate-limited HTTP client with caching and retries.
+- Nominatim and Photon geocoding share one rate-limited HTTP client with persistent caching and retries.
 - Routing uses OpenRouteService when available and OSRM as fallback.
 
 ## Limitations
 
 - The travel domain is currently tuned for Sri Lanka-focused searches and prompts.
+- No geocoder can locate an invented name or a place absent from all configured map indexes; those entries must be added from a coordinate-backed search result.
 - Hotel recommendations are AI-assisted estimates, not live booking inventory.
-- Transport cost is still an estimate, even when route distance is available.
+- Google returns a transit fare only when it has fare data for every transit step. Otherwise the application uses the current NTC bus fare-stage or railway-zone estimate; travelers should still verify the final ticket with the operator.
 - Google APIs do not provide general live hotel inventory or complete authoritative Sri Lankan train/bus schedules; booking and local-transport partners are still required for those features.
 - Collaboration currently requires the invited traveler to have an account; email delivery and simultaneous live cursor editing require a notification/realtime provider.
 

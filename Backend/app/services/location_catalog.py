@@ -32,7 +32,11 @@ SRI_LANKA_LOCATIONS = (
         display_name="Hiriwadunna Village Safari area near Habarana, Sri Lanka",
         latitude=8.0423226,
         longitude=80.7564622,
-        aliases=("hiriwadunna village safari", "hiriwadunna safari"),
+        aliases=(
+            "hiriwadunna village safari",
+            "hiriwadunna village",
+            "hiriwadunna safari",
+        ),
     ),
     SriLankaLocation(
         display_name="Dambulla Cave Temple, Sri Lanka",
@@ -51,6 +55,29 @@ SRI_LANKA_LOCATIONS = (
         latitude=7.9403,
         longitude=81.0188,
         aliases=("polonnaruwa ancient city", "ancient city of polonnaruwa", "polonnaruwa"),
+    ),
+    SriLankaLocation(
+        display_name="Bahirawakanda Temple, Kandy, Sri Lanka",
+        latitude=7.29553,
+        longitude=80.63094,
+        aliases=(
+            "bahirawakanda vihara buddha statue",
+            "bahirawakanda buddha",
+            "bahirawakanda temple",
+            "bahirawakanada temple",
+        ),
+    ),
+    SriLankaLocation(
+        display_name="Udawattakele Forest Reserve Main Entrance, Kandy, Sri Lanka",
+        latitude=7.2936206,
+        longitude=80.6441322,
+        aliases=(
+            "udawatta kele sanctuary",
+            "udawattakele sanctuary",
+            "udawattekele sanctuary",
+            "udawattakele forest reserve",
+            "udawatta kele forest reserve",
+        ),
     ),
 )
 

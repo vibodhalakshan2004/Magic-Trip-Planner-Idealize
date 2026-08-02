@@ -14,7 +14,7 @@ from app.schemas.route import (
 )
 from app.services.geocoder import GeocoderService
 from app.services.osrm_router import OSRMRouterService
-from app.services.transport_cost import estimate_segment_transport_cost
+from app.services.transport_cost import estimate_segment_transport_cost_details
 
 logger = logging.getLogger(__name__)
 
@@ -88,21 +88,11 @@ class RouteAgent:
         return f"{place.name}, {trip.destination}, Sri Lanka"
 
     def _place_queries(self, place: Any, trip: Any) -> list[str]:
-        queries = []
-
-        if getattr(place, "search_query", None):
-            queries.append(place.search_query)
-
-        queries.append(f"{place.name}, {trip.destination}, Sri Lanka")
-        queries.append(f"{place.name}, Sri Lanka")
-
-        unique_queries = []
-
-        for query in queries:
-            if query and query not in unique_queries:
-                unique_queries.append(query)
-
-        return unique_queries
+        return self.geocoder.place_queries(
+            name=place.name,
+            destination=trip.destination,
+            search_query=getattr(place, "search_query", None),
+        )
 
     def _make_hotel_query(self, hotel: Any, trip: Any) -> str:
         if getattr(hotel, "search_query", None):
@@ -412,7 +402,7 @@ class RouteAgent:
         date_value,
         places: List[dict],
         start_point: dict,
-        return_point: Optional[dict],
+        return_points: List[dict],
     ) -> DayRoutePlan:
 
         start_time = self._parse_start_time(request.day_start_time)
@@ -446,10 +436,12 @@ class RouteAgent:
 
             travel_minutes = route["duration_minutes"]
             travel_distance = route["distance_km"]
-            segment_cost = estimate_segment_transport_cost(
+            segment_cost = estimate_segment_transport_cost_details(
                 transport_type=trip.transport_type,
                 distance_km=travel_distance,
                 travelers=getattr(trip, "travelers", 1),
+                origin=current_point,
+                destination=place,
             )
 
             route_start_time = current_datetime
@@ -486,7 +478,11 @@ class RouteAgent:
                 end_time=self._time_to_string(arrival_datetime),
                 distance_km=travel_distance,
                 duration_minutes=travel_minutes,
-                transport_cost_lkr=segment_cost,
+                transport_cost_lkr=segment_cost.total_lkr,
+                transport_cost_source=segment_cost.source,
+                fare_per_person_lkr=segment_cost.per_person_lkr,
+                passenger_count=segment_cost.passenger_count,
+                fare_is_live=segment_cost.fare_is_live,
                 encoded_polyline=route["encoded_polyline"],
                 path_coordinates=[
                     Coordinate(**coordinate)
@@ -525,7 +521,14 @@ class RouteAgent:
             current_datetime = visit_end_datetime
             current_point = place
 
-        if return_point and places:
+        for return_point in return_points:
+            if (
+                current_point["latitude"] == return_point["latitude"]
+                and current_point["longitude"] == return_point["longitude"]
+            ):
+                current_point = return_point
+                continue
+
             route = self.router.route_between(
                 origin=current_point,
                 destination=return_point,
@@ -536,10 +539,12 @@ class RouteAgent:
             route_end_time = current_datetime + timedelta(
                 minutes=route["duration_minutes"]
             )
-            segment_cost = estimate_segment_transport_cost(
+            segment_cost = estimate_segment_transport_cost_details(
                 transport_type=trip.transport_type,
                 distance_km=route["distance_km"],
                 travelers=getattr(trip, "travelers", 1),
+                origin=current_point,
+                destination=return_point,
             )
 
             segment = RouteSegment(
@@ -549,7 +554,11 @@ class RouteAgent:
                 end_time=self._time_to_string(route_end_time),
                 distance_km=route["distance_km"],
                 duration_minutes=route["duration_minutes"],
-                transport_cost_lkr=segment_cost,
+                transport_cost_lkr=segment_cost.total_lkr,
+                transport_cost_source=segment_cost.source,
+                fare_per_person_lkr=segment_cost.per_person_lkr,
+                passenger_count=segment_cost.passenger_count,
+                fare_is_live=segment_cost.fare_is_live,
                 encoded_polyline=route["encoded_polyline"],
                 path_coordinates=[
                     Coordinate(**coordinate)
@@ -692,13 +701,13 @@ class RouteAgent:
             if index == 0:
                 start_point = start_location_point
 
-            return_point = None
+            return_points = []
 
             if request.return_to_hotel and current_day_hotel:
-                return_point = current_day_hotel
+                return_points.append(current_day_hotel)
 
             if request.return_to_start_location and index == len(dates) - 1:
-                return_point = start_location_point
+                return_points.append(start_location_point)
 
             if manual_by_key:
                 ordered_places = grouped_places[index]
@@ -715,7 +724,7 @@ class RouteAgent:
                 date_value=date_value,
                 places=ordered_places,
                 start_point=start_point,
-                return_point=return_point,
+                return_points=return_points,
             )
 
             days.append(day_plan)

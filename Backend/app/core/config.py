@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     GOOGLE_PLACES_ENABLED: bool = False
     GOOGLE_ROUTES_ENABLED: bool = False
     GOOGLE_GEOCODING_ENABLED: bool = False
+    GOOGLE_TRANSIT_FARES_ENABLED: bool = False
 
     # Conservative application-side monthly limits. Their maximum accepted
     # values remain below Google's published free caps, leaving headroom for

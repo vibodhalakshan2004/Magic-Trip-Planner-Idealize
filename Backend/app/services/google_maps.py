@@ -28,6 +28,7 @@ class GoogleMapsService:
                 "places": settings.GOOGLE_PLACES_ENABLED,
                 "routes": settings.GOOGLE_ROUTES_ENABLED,
                 "geocoding": settings.GOOGLE_GEOCODING_ENABLED,
+                "transit_fares": settings.GOOGLE_TRANSIT_FARES_ENABLED,
             }.get(service, False)
         )
 
@@ -170,6 +171,86 @@ class GoogleMapsService:
             "path_coordinates": path_coordinates,
             "instructions": instructions,
             "provider": "Google Routes",
+        }
+
+    def transit_fare(
+        self,
+        origin: dict,
+        destination: dict,
+        transit_mode: str = "bus",
+    ) -> dict | None:
+        """Return Google's current per-passenger fare when full fare data exists."""
+        if not self.enabled("transit_fares"):
+            return None
+
+        normalized_mode = (transit_mode or "bus").lower()
+        allowed_modes = ["TRAIN"] if normalized_mode == "train" else ["BUS"]
+        body: dict[str, Any] = {
+            "origin": {
+                "location": {
+                    "latLng": {
+                        "latitude": origin["latitude"],
+                        "longitude": origin["longitude"],
+                    }
+                }
+            },
+            "destination": {
+                "location": {
+                    "latLng": {
+                        "latitude": destination["latitude"],
+                        "longitude": destination["longitude"],
+                    }
+                }
+            },
+            "travelMode": "TRANSIT",
+            "transitPreferences": {
+                "allowedTravelModes": allowed_modes,
+                "routingPreference": "FEWER_TRANSFERS",
+            },
+            "languageCode": "en-US",
+            "units": "METRIC",
+        }
+        cache_text = (
+            f"{origin['latitude']:.5f},{origin['longitude']:.5f}:"
+            f"{destination['latitude']:.5f},{destination['longitude']:.5f}:"
+            f"TRANSIT:{normalized_mode}"
+        )
+        data = map_http_client.post_json(
+            self.ROUTES_URL,
+            json_body=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": settings.GOOGLE_API_KEY or "",
+                "X-Goog-FieldMask": (
+                    "routes.distanceMeters,routes.duration,"
+                    "routes.travelAdvisory.transitFare"
+                ),
+            },
+            timeout=30,
+            cache_key=f"google-transit-fare:{self._digest(cache_text)}",
+            cache_ttl_seconds=900,
+            context="Google transit fare",
+            before_request=lambda: google_quota_guard.reserve("routes"),
+        )
+        routes = data.get("routes") or []
+        if not routes:
+            return None
+
+        route = routes[0]
+        fare = (route.get("travelAdvisory") or {}).get("transitFare") or {}
+        if fare.get("currencyCode") != "LKR":
+            return None
+
+        amount = float(fare.get("units") or 0) + (float(fare.get("nanos") or 0) / 1_000_000_000)
+        if amount <= 0:
+            return None
+
+        return {
+            "fare_lkr": round(amount, 2),
+            "distance_km": round(float(route.get("distanceMeters") or 0) / 1000, 2),
+            "duration_minutes": round(self._seconds(route.get("duration")) / 60, 1),
+            "provider": "Google Routes transit fare",
+            "transit_mode": normalized_mode,
         }
 
     def daily_weather(self, latitude: float, longitude: float, days: int = 10) -> dict[date, dict]:

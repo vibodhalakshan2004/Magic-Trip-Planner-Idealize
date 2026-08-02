@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import * as budgetApi from "@/lib/api/budget";
 import * as destinationApi from "@/lib/api/destination";
@@ -42,8 +42,11 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
   const [prompt, setPrompt] = useState<{ data: SavedPreferencePrompt; retry: (useSaved: boolean) => Promise<void> } | null>(null);
   const [activeStop, setActiveStop] = useState<RouteStop | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const runInFlight = useRef(false);
 
   async function run(label: string, fn: () => Promise<void>) {
+    if (runInFlight.current) return;
+    runInFlight.current = true;
     setError(undefined);
     setBusy(label);
     try {
@@ -52,6 +55,7 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
       setError(err);
     } finally {
       setBusy(null);
+      runInFlight.current = false;
     }
   }
 
@@ -134,6 +138,10 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
   function choosePlace(place: Place) {
     const normalized = normalizePlace(place);
     const exists = store.selectedPlaces.some((p) => placeIdentity(p) === placeIdentity(normalized));
+    if (!exists && (!Number.isFinite(normalized.latitude) || !Number.isFinite(normalized.longitude))) {
+      setError(new Error("This suggestion has no verified map location. Find it with place search before adding it."));
+      return;
+    }
     store.setSelectedPlaces(exists ? store.selectedPlaces.filter((p) => placeIdentity(p) !== placeIdentity(normalized)) : [...store.selectedPlaces, normalized]);
   }
 
@@ -221,7 +229,7 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
         );
       case "route-hotels":
         return (
-          <Panel title="Final route with hotels" copy="Regenerate once after selecting hotels so the map includes accommodation transfers while preserving your day, time, and duration choices.">
+          <Panel title="Final route with hotels" copy="The map includes each selected accommodation transfer while preserving your day, time, and duration choices. Regenerate only when you want to change the plan.">
             <RouteSection
               tripId={store.trip?.id}
               places={store.selectedPlaces}
@@ -230,6 +238,7 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
               activeStop={activeStop}
               setActiveStop={setActiveStop}
               onNext={() => setActive("budget")}
+              nextLabel="Next: Budget"
               onConfirm={() => {}}
               onGenerate={(body) => run("route", async () => {
                 const route = await routeApi.generateRoute(store.trip!.id, {
@@ -258,13 +267,31 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
       return (
         <Panel title={`Day ${dayNumber} planning`} copy="Pick a hotel for this day and estimate your food/other costs.">
           <DailyHotelSelection 
+            key={dayNumber}
             tripId={store.trip!.id} 
             route={store.routePlan!} 
             selectedHotels={store.selectedHotels}
             activeDay={dayNumber}
             onSaved={(hotels) => { store.setSelectedHotels(hotels); setToast(`Day ${dayNumber} selection saved`); }} 
             onError={setError} 
-            onNext={() => setActive(isLastDay ? "route-hotels" : `day-${dayNumber + 1}`)} 
+            onNext={() => {
+              if (!isLastDay) {
+                setActive(`day-${dayNumber + 1}`);
+                return;
+              }
+              void run("route", async () => {
+                const route = await routeApi.generateRoute(store.trip!.id, {
+                  day_start_time: "08:00",
+                  include_hotels: true,
+                  return_to_hotel: true,
+                  return_to_start_location: true,
+                  manual_schedule: manualScheduleFromRoute(store.routePlan),
+                });
+                store.setRoute(route);
+                setToast("Final route generated with every selected hotel");
+                setActive("route-hotels");
+              });
+            }}
           />
         </Panel>
       );

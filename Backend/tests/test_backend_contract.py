@@ -82,6 +82,10 @@ class FakeDB:
             name="Test User",
             email="test@example.com",
             password_hash=hash_password("StrongPass!2026"),
+            profile_picture=None,
+            profile_picture_content_type=None,
+            profile_picture_version=None,
+            profile_picture_updated_at=None,
         )
         self.trip = SimpleNamespace(
             id=trip_id,
@@ -222,6 +226,9 @@ def test_openapi_exposes_planner_restore_endpoints():
         "/planning/jobs/{job_id}/retry",
         "/planning/trips/{trip_id}/versions",
         "/collaboration/trips/{trip_id}",
+        "/auth/me",
+        "/auth/me/password",
+        "/auth/me/profile-picture",
     }
 
     assert expected_paths.issubset(schema["paths"].keys())
@@ -304,6 +311,77 @@ def test_media_relevance_guard_rejects_unrelated_titles():
     )
 
 
+def test_media_lookup_prefers_summary_thumbnail(monkeypatch):
+    service = MediaLookupService()
+    monkeypatch.setattr(service, "_search_title", lambda _query: "Galle Fort")
+    monkeypatch.setattr(
+        "app.services.media_lookup.map_http_client.get_json",
+        lambda *_args, **_kwargs: {
+            "thumbnail": {"source": "https://upload.wikimedia.org/galle-320.jpg"},
+            "originalimage": {"source": "https://upload.wikimedia.org/galle-6000.jpg"},
+            "extract": "Historic fort.",
+        },
+    )
+
+    media = service.lookup_media("Galle Fort Sri Lanka")
+
+    assert media["image_url"] == "https://upload.wikimedia.org/galle-320.jpg"
+
+
+def test_commons_lookup_requests_and_uses_thumbnail(monkeypatch):
+    service = MediaLookupService()
+    captured = {}
+
+    def fake_get_json(*_args, **kwargs):
+        captured.update(kwargs["params"])
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "imageinfo": [
+                            {
+                                "mime": "image/jpeg",
+                                "url": "https://upload.wikimedia.org/original.jpg",
+                                "thumburl": "https://upload.wikimedia.org/thumb-1200.jpg",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(
+        "app.services.media_lookup.map_http_client.get_json",
+        fake_get_json,
+    )
+
+    image_url = service._search_commons_image("Mirissa Beach")
+
+    assert captured["iiurlwidth"] == 1200
+    assert image_url == "https://upload.wikimedia.org/thumb-1200.jpg"
+
+
+def test_media_lookup_uses_representative_photo_when_exact_place_has_none(monkeypatch):
+    service = MediaLookupService()
+    monkeypatch.setattr(service, "_search_title", lambda _query: None)
+    searched = []
+
+    def fake_commons(query):
+        searched.append(query)
+        if query == "tea estate Sri Lanka":
+            return "https://upload.wikimedia.org/tea-estate-1280.jpg"
+        return None
+
+    monkeypatch.setattr(service, "_search_commons_image", fake_commons)
+
+    media = service.lookup_media("Handunugoda Tea Estate Sri Lanka")
+
+    assert "Handunugoda Tea Estate Sri Lanka" in searched
+    assert "tea estate Sri Lanka" in searched
+    assert media["image_url"] == "https://upload.wikimedia.org/tea-estate-1280.jpg"
+    assert media["description"] is None
+
+
 def test_auth_tokens_and_password_limits_are_safe():
     password_hash = hash_password("StrongPass!2026")
 
@@ -339,5 +417,66 @@ def test_login_uses_http_only_cookie_and_logout_clears_it():
         assert client.get("/auth/me").status_code == 200
         assert client.post("/auth/logout").status_code == 200
         assert client.get("/auth/me").status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_profile_details_password_and_picture_can_be_updated():
+    fake_db = FakeDB()
+
+    def override_db():
+        yield fake_db
+
+    def override_user():
+        return fake_db.user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        client = TestClient(app)
+
+        details = client.patch(
+            "/auth/me",
+            json={"name": "Updated Traveler", "email": "UPDATED@example.com"},
+        )
+        assert details.status_code == 200
+        assert details.json()["name"] == "Updated Traveler"
+        assert details.json()["email"] == "updated@example.com"
+
+        assert client.put(
+            "/auth/me/password",
+            json={"current_password": "wrong", "new_password": "NewStrongPass!2026"},
+        ).status_code == 400
+        password = client.put(
+            "/auth/me/password",
+            json={
+                "current_password": "StrongPass!2026",
+                "new_password": "NewStrongPass!2026",
+            },
+        )
+        assert password.status_code == 200
+        assert verify_password("NewStrongPass!2026", fake_db.user.password_hash)
+
+        image_bytes = b"\x89PNG\r\n\x1a\n" + b"profile-image"
+        upload = client.put(
+            "/auth/me/profile-picture",
+            files={"picture": ("avatar.png", image_bytes, "image/png")},
+        )
+        assert upload.status_code == 200
+        assert upload.json()["profile_picture_version"]
+
+        picture = client.get("/auth/me/profile-picture")
+        assert picture.status_code == 200
+        assert picture.content == image_bytes
+        assert picture.headers["content-type"] == "image/png"
+        assert client.get(
+            "/auth/me/profile-picture",
+            headers={"If-None-Match": picture.headers["etag"]},
+        ).status_code == 304
+
+        deleted = client.delete("/auth/me/profile-picture")
+        assert deleted.status_code == 200
+        assert deleted.json()["profile_picture_version"] is None
+        assert client.get("/auth/me/profile-picture").status_code == 404
     finally:
         app.dependency_overrides.clear()

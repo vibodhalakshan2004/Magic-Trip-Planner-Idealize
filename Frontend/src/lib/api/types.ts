@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; email: string };
+export type User = { id: string; name: string; email: string; profile_picture_version?: string | null };
 export type TokenResponse = { access_token: string; token_type: string };
 export type Health = { status: string; database: string };
 
@@ -133,6 +133,10 @@ export type RouteSegment = {
   distance_km?: number;
   duration_minutes?: number;
   transport_cost_lkr?: number;
+  transport_cost_source?: string;
+  fare_per_person_lkr?: number | null;
+  passenger_count?: number;
+  fare_is_live?: boolean;
   encoded_polyline?: string | null;
   path_coordinates?: Coordinate[];
   instructions?: { instruction: string; distance_km?: number; duration_minutes?: number }[];
