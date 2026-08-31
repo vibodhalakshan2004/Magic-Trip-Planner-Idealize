@@ -85,6 +85,14 @@ async function fetchBackend(
     if (redirectCount === MAX_BACKEND_REDIRECTS) throw new Error("The backend returned too many redirects.");
 
     const redirectedTarget = new URL(location, target);
+    if (
+      redirectedTarget.origin !== baseUrl.origin &&
+      baseUrl.protocol === "https:" &&
+      redirectedTarget.protocol === "http:" &&
+      redirectedTarget.host === baseUrl.host
+    ) {
+      redirectedTarget.protocol = "https:";
+    }
     if (redirectedTarget.origin !== baseUrl.origin) throw new Error("The backend attempted an external redirect.");
     if (upstream.body) await upstream.body.cancel();
 
