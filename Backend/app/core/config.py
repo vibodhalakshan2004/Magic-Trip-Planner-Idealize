@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     SESSION_COOKIE_NAME: str = "magictrip_session"
     SESSION_COOKIE_SECURE: bool = False
     SESSION_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    GOOGLE_AUTH_CLIENT_ID: str | None = None
+    GOOGLE_AUTH_CSRF_COOKIE_NAME: str = "magictrip_google_csrf"
+    GOOGLE_AUTH_CSRF_MAX_AGE_SECONDS: int = Field(default=600, ge=120, le=1_800)
     API_RATE_LIMIT_PER_MINUTE: int = Field(default=180, ge=10, le=10_000)
     AUTH_RATE_LIMIT_PER_MINUTE: int = Field(default=10, ge=3, le=100)
 

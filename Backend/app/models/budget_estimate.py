@@ -7,6 +7,7 @@ from sqlalchemy import Integer
 from sqlalchemy import Float
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -16,6 +17,9 @@ from app.core.database import Base
 
 class BudgetEstimate(Base):
     __tablename__ = "budget_estimates"
+    __table_args__ = (
+        Index("ix_budget_estimates_trip_created", "trip_id", "created_at"),
+    )
 
     id = Column(
         UUID(as_uuid=True),

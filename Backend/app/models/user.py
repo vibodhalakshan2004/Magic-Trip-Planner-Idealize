@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, LargeBinary, String
+from sqlalchemy import Column, DateTime, LargeBinary, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -11,6 +11,9 @@ from app.core.database import Base
 class User(Base):
 
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("google_subject", name="uq_users_google_subject"),
+    )
 
     id = Column(
         UUID(as_uuid=True),
@@ -31,7 +34,12 @@ class User(Base):
 
     password_hash = Column(
         String,
-        nullable=False
+        nullable=True
+    )
+
+    google_subject = Column(
+        String(255),
+        nullable=True,
     )
 
     profile_picture = Column(

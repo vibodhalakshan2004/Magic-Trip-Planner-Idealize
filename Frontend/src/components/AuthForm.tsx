@@ -3,8 +3,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Eye, EyeOff, Loader2, MapPin } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent, useState } from "react";
 import { ApiErrorAlert } from "@/components/ApiErrorAlert";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { LogoBrand } from "@/components/LogoBrand";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
@@ -13,6 +15,7 @@ import { useAuthStore } from "@/lib/store/auth-store";
 import { usePlannerStore } from "@/lib/store/planner-store";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const setSession = useAuthStore((state) => state.setSession);
   const resetPlanner = usePlannerStore((state) => state.reset);
@@ -47,15 +50,34 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         await authApi.register({ name: name.trim() || "Traveler", email: email.trim(), password });
       }
       await authApi.login(email.trim(), password);
-      resetPlanner();
-      queryClient.clear();
-      const user = await authApi.me();
-      setSession(user);
-      window.location.href = "/dashboard";
+      await finishAuthentication();
     } catch (err) {
       setError(err);
       setBusy(false);
     }
+  }
+
+  async function submitGoogleCredential(credential: string) {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const config = await authApi.googleAuthConfig();
+      if (!config.enabled || !config.csrf_token) throw new Error("Google sign-in is not configured.");
+      await authApi.loginWithGoogle(credential, config.csrf_token);
+      await finishAuthentication();
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  }
+
+  async function finishAuthentication() {
+    resetPlanner();
+    queryClient.clear();
+    const user = await authApi.me();
+    setSession(user);
+    router.replace("/dashboard");
   }
 
   function submitOnEnter(event: KeyboardEvent<HTMLInputElement>) {
@@ -95,7 +117,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             <p className="mt-3 text-sm leading-6 text-[#60766f]">
               {mode === "login" ? "Sign in to continue planning where you left off." : "Save your itineraries and return to them from any device."}
             </p>
-            <div className="mt-8 grid gap-5">
+            <GoogleSignInButton mode={mode} disabled={busy} onCredential={submitGoogleCredential} onError={setError} />
+            <div className="mt-5 grid gap-5">
               {mode === "register" ? (
                 <Field label="Your name">
                   <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="How should we greet you?" />

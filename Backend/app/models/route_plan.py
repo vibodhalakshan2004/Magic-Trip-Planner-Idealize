@@ -5,6 +5,7 @@ from sqlalchemy import Column
 from sqlalchemy import DateTime
 from sqlalchemy import Float
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 from sqlalchemy import String
 from sqlalchemy import Text
 
@@ -16,6 +17,9 @@ from app.core.database import Base
 
 class RoutePlan(Base):
     __tablename__ = "route_plans"
+    __table_args__ = (
+        Index("ix_route_plans_trip_created", "trip_id", "created_at"),
+    )
 
     id = Column(
         UUID(as_uuid=True),

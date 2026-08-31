@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -20,6 +21,8 @@ class PlanningJob(Base):
     __tablename__ = "planning_jobs"
     __table_args__ = (
         UniqueConstraint("user_id", "idempotency_key", name="uq_planning_jobs_user_idempotency"),
+        Index("ix_planning_jobs_status_created", "status", "created_at"),
+        Index("ix_planning_jobs_trip", "trip_id", "created_at"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

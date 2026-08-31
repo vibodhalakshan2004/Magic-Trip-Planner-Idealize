@@ -70,13 +70,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Button>
               </>
             ) : (
-              <Button className="hidden sm:inline-flex" variant="secondary" onClick={() => router.push("/login")}>
+              <Button className="hidden shrink-0 whitespace-nowrap sm:inline-flex" variant="secondary" onClick={() => router.push("/login")}>
                 <LogIn className="h-4 w-4" /> Sign in
               </Button>
             )}
             <button
               type="button"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[#17453a]/10 bg-white text-[#17453a] md:hidden"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#17453a]/10 bg-white text-[#17453a] md:hidden"
               aria-label={menuOpen ? "Close navigation" : "Open navigation"}
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}

@@ -51,7 +51,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client = request.client.host if request.client else "unknown"
-        auth_path = request.url.path in {"/auth/login", "/auth/register"}
+        auth_path = request.url.path in {"/auth/login", "/auth/register", "/auth/google"}
         limit = settings.AUTH_RATE_LIMIT_PER_MINUTE if auth_path else settings.API_RATE_LIMIT_PER_MINUTE
         bucket = f"{client}:{'auth' if auth_path else 'api'}"
         now = time.monotonic()

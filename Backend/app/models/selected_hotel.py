@@ -8,6 +8,7 @@ from sqlalchemy import Integer
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -17,6 +18,9 @@ from app.core.database import Base
 
 class SelectedHotel(Base):
     __tablename__ = "selected_hotels"
+    __table_args__ = (
+        Index("ix_selected_hotels_trip_day", "trip_id", "day_number"),
+    )
 
     id = Column(
         UUID(as_uuid=True),

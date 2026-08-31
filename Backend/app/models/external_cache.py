@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, DateTime, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.database import Base
@@ -8,6 +8,9 @@ from app.core.database import Base
 
 class ExternalCache(Base):
     __tablename__ = "external_cache"
+    __table_args__ = (
+        Index("ix_external_cache_expires", "expires_at"),
+    )
 
     cache_key = Column(String(500), primary_key=True)
     payload = Column(JSONB, nullable=False)

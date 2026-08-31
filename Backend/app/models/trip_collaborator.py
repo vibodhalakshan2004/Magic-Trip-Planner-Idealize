@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
@@ -11,6 +11,7 @@ class TripCollaborator(Base):
     __tablename__ = "trip_collaborators"
     __table_args__ = (
         UniqueConstraint("trip_id", "user_id", name="uq_trip_collaborators_trip_user"),
+        Index("ix_trip_collaborators_user", "user_id"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -8,7 +8,7 @@ export function PlannerStepper({ steps, active, onSelect }: { steps: readonly Pl
   const currentIndex = Math.max(steps.findIndex((step) => step.id === active), 0);
 
   return (
-    <aside className="lg:sticky lg:top-24 lg:self-start">
+    <aside className="min-w-0 max-w-full lg:sticky lg:top-24 lg:self-start">
       <div className="mb-3 flex items-end justify-between px-1">
         <div>
           <p className="text-xs font-extrabold tracking-[0.13em] text-[#789087]">TRIP PROGRESS</p>
@@ -19,7 +19,7 @@ export function PlannerStepper({ steps, active, onSelect }: { steps: readonly Pl
       <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-[#dfe7e1]">
         <div className="h-full rounded-full bg-[#d56535] transition-all" style={{ width: `${Math.max(((currentIndex + 1) / steps.length) * 100, 4)}%` }} />
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:rounded-2xl lg:border lg:border-[#17453a]/10 lg:bg-white lg:p-2 lg:shadow-[0_8px_30px_rgba(18,60,50,.04)]">
+      <div className="flex w-full max-w-full gap-2 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:rounded-2xl lg:border lg:border-[#17453a]/10 lg:bg-white lg:p-2 lg:shadow-[0_8px_30px_rgba(18,60,50,.04)]">
         {steps.map((step, index) => {
           const isActive = step.id === active;
           return (

@@ -5,6 +5,7 @@ from sqlalchemy import Text
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -20,6 +21,9 @@ from app.core.database import Base
 class Review(Base):
 
     __tablename__ = "reviews"
+    __table_args__ = (
+        Index("ix_reviews_user_created", "user_id", "created_at"),
+    )
 
     id = Column(
         UUID(as_uuid=True),
