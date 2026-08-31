@@ -173,6 +173,12 @@ Docker Compose runs four services:
 - OpenWeather and optional Google Weather
 - Optional Google Places, Routes, Geocoding, and transit fare lookup
 
+## Production deployment
+
+The recommended production topology is the Next.js frontend on Vercel plus the FastAPI API, continuously running planning worker, and PostgreSQL on Azure. The worker is a persistent process and should not be deployed as a Vercel Function.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the exact architecture, Vercel project settings, Azure container settings, production environment variables, and public launch checklist.
+
 ## Quick start with Docker
 
 Docker is the simplest way to run the complete application because it starts PostgreSQL, applies migrations, launches the API, runs the planning worker, and serves the frontend.
@@ -227,13 +233,7 @@ docker compose down
 docker compose down --volumes
 ```
 
-If the backend URL visible to the browser is different from `http://localhost:8000`, provide it before building the frontend:
-
-```powershell
-$env:NEXT_PUBLIC_API_BASE_URL = "https://api.example.com"
-docker compose build frontend
-docker compose up -d
-```
+The frontend reaches the backend through its same-origin `/api/backend` proxy. Compose supplies the internal `BACKEND_API_URL=http://backend:8000` value at runtime.
 
 ## Local development setup
 
@@ -299,7 +299,6 @@ Open a third terminal:
 ```powershell
 Set-Location Frontend
 npm ci
-$env:NEXT_PUBLIC_API_BASE_URL = "http://localhost:8000"
 npm run dev
 ```
 
@@ -321,6 +320,9 @@ Backend variables are loaded from `Backend/.env`.
 | `SESSION_COOKIE_NAME` | No | `magictrip_session` | HttpOnly session-cookie name |
 | `SESSION_COOKIE_SECURE` | No | `false` | Require HTTPS for the session cookie |
 | `SESSION_COOKIE_SAMESITE` | No | `lax` | Cookie SameSite policy |
+| `GOOGLE_AUTH_CLIENT_ID` | No | Empty | Public Google Identity Services Web client ID; enables Google sign-in |
+| `GOOGLE_AUTH_CSRF_COOKIE_NAME` | No | `magictrip_google_csrf` | Short-lived double-submit cookie used during Google sign-in |
+| `GOOGLE_AUTH_CSRF_MAX_AGE_SECONDS` | No | `600` | Google sign-in CSRF-token lifetime |
 | `API_RATE_LIMIT_PER_MINUTE` | No | `180` | General API rate limit |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | No | `10` | Authentication endpoint rate limit |
 | `PLANNING_WORKER_POLL_SECONDS` | No | `1.5` | Planning-job polling interval |
@@ -354,15 +356,36 @@ Backend variables are loaded from `Backend/.env`.
 
 All Google keys remain server-side. Never expose `GOOGLE_API_KEY` through a variable beginning with `NEXT_PUBLIC_`.
 
+`GOOGLE_AUTH_CLIENT_ID` is a public OAuth identifier, not the `GOOGLE_API_KEY` and not a secret. The frontend obtains it from `/auth/google/config` at runtime, while the backend uses the same value to verify the token audience. This app does not require a Google OAuth client secret.
+
 The current frontend displays OpenStreetMap tiles. Keep Google Places, Routes, and Geocoding disabled unless their use and map-display requirements have been reviewed. Google Weather and transit fare lookup can be enabled independently.
 
-### Frontend setting
+### Google account sign-in setup
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | API origin used by browser requests |
+1. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview) and create or select a project.
+2. Complete **Branding** with the Magic Trip Planner name, support email, homepage, privacy-policy URL, and developer contact.
+3. Under **Audience**, choose **External** for public users. While the app is in Testing, add every Google account that needs to sign in as a test user.
+4. Under **Clients**, create an OAuth client with application type **Web application**.
+5. Add these **Authorized JavaScript origins**:
+   - `http://localhost:3000` for local development;
+   - `http://127.0.0.1:3000` if that local URL is used;
+   - the exact production Vercel origin, such as `https://YOUR-PROJECT.vercel.app`;
+   - the final custom domain too, when one is added.
+   Google does not accept wildcard origins, so dynamic Vercel Preview URLs will not support the button unless each exact preview origin is registered. Use the stable production or custom domain for acceptance testing.
+6. No Authorized redirect URI is required because the app uses the Google Identity Services JavaScript popup callback.
+7. Copy the Web client ID (ending in `.apps.googleusercontent.com`) into `GOOGLE_AUTH_CLIENT_ID` in `Backend/.env` locally and on the Azure API Container App.
+8. Restart the backend. The Google button appears automatically on both sign-in and registration screens.
 
-This variable is embedded in the frontend build and must be available during `npm run build` or `docker compose build frontend`.
+Only the default `openid`, `email`, and `profile` identity information is used. The backend verifies the Google signature, audience, issuer, expiry, and verified email before it creates an HttpOnly Magic Trip Planner session. Existing Gmail or Google Workspace password accounts with the same verified email are linked automatically; other existing email accounts continue to use email/password to avoid unsafe account takeover through a third-party email address.
+
+### Frontend settings
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `BACKEND_API_URL` | In production | `http://127.0.0.1:8000` in development | Server-only target for the same-origin `/api/backend` proxy |
+| `NEXT_PUBLIC_API_BASE_URL` | No | `/api/backend` | Optional direct browser API base; leave unset in production |
+
+`BACKEND_API_URL` is read at request time and can be changed without rebuilding the frontend. A `NEXT_PUBLIC_` override is embedded in browser JavaScript at build time and bypasses the first-party proxy.
 
 ## External providers and fallbacks
 
@@ -400,7 +423,7 @@ The proxy:
 - Returns a local SVG placeholder only after all allowed sources fail.
 - Does not cache transient placeholders, allowing a later request to recover automatically.
 
-Profile pictures are a separate authenticated feature. JPEG, PNG, WebP, and GIF uploads are signature-checked and limited to 5 MB. They use private ETag-based caching.
+Profile pictures are a separate authenticated feature. JPEG, PNG, WebP, and GIF uploads are signature-checked and limited to 4 MB so requests stay below Vercel's function payload ceiling. They use private ETag-based caching.
 
 ### Location verification
 
@@ -556,6 +579,7 @@ For production:
 
 ```dotenv
 SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_SAMESITE=lax
 FRONTEND_ORIGINS=https://your-frontend.example
 ```
 
@@ -609,17 +633,18 @@ Inspect the backend log for OpenRouteService, Google Routes, or OSRM errors. If 
 
 ### A location image shows the placeholder
 
-The proxy returns a placeholder only when the saved source and all Wikimedia fallback searches fail or time out. Check the frontend log and request `/api/image` directly. Successful location images can be up to 10 MB; profile uploads have a separate 5 MB limit.
+The proxy returns a placeholder only when the saved source and all Wikimedia fallback searches fail or time out. Check the frontend log and request `/api/image` directly. Proxied location images and profile uploads are limited to 4 MB to remain below Vercel's function payload ceiling.
 
 Because placeholders use `Cache-Control: no-store`, refreshing later can recover after a temporary upstream failure.
 
 ### Authentication works in the API but not the browser
 
-- Verify `NEXT_PUBLIC_API_BASE_URL` points to the backend visible from the browser.
+- Verify the frontend deployment has a valid server-only `BACKEND_API_URL`.
+- Confirm browser requests use `/api/backend/*`; leave `NEXT_PUBLIC_API_BASE_URL` unset for the recommended production setup.
 - Add the exact frontend origin to `FRONTEND_ORIGINS`.
 - Keep `SESSION_COOKIE_SECURE=false` for plain HTTP local development.
 - Set it to `true` only when the site is served through HTTPS.
-- Restart/rebuild the frontend after changing a `NEXT_PUBLIC_` variable.
+- Restart the frontend after changing `BACKEND_API_URL`.
 
 ### Database changes are missing
 

@@ -1,8 +1,12 @@
 import type { SavedPreferencePrompt } from "./types";
 
-const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const CONFIGURED_API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/backend").replace(/\/+$/, "");
 
 function apiBaseUrl() {
+  if (!CONFIGURED_API_BASE_URL.startsWith("http://") && !CONFIGURED_API_BASE_URL.startsWith("https://")) {
+    return CONFIGURED_API_BASE_URL;
+  }
+
   if (typeof window === "undefined") return CONFIGURED_API_BASE_URL;
 
   const configured = new URL(CONFIGURED_API_BASE_URL);
@@ -12,7 +16,7 @@ function apiBaseUrl() {
     configured.hostname = window.location.hostname;
   }
 
-  return configured.origin;
+  return configured.toString().replace(/\/+$/, "");
 }
 
 export class ApiError extends Error {

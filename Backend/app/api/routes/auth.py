@@ -1,8 +1,10 @@
 import hashlib
+import secrets
 from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
+    Cookie,
     Depends,
     File,
     Header,
@@ -12,6 +14,7 @@ from fastapi import (
 )
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -21,14 +24,21 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models.user import User
 from app.schemas.user import (
     RegisterResponse,
+    GoogleAuthConfigResponse,
+    GoogleCredentialRequest,
     TokenResponse,
     UserCreate,
     UserPasswordUpdate,
     UserProfileUpdate,
     UserResponse,
 )
+from app.services.google_identity import (
+    GoogleIdentityUnavailableError,
+    InvalidGoogleCredentialError,
+    verify_google_credential,
+)
 
-MAX_PROFILE_PICTURE_BYTES = 5 * 1024 * 1024
+MAX_PROFILE_PICTURE_BYTES = 4 * 1024 * 1024
 PROFILE_PICTURE_SIGNATURES = {
     "image/jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
     "image/png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
@@ -110,24 +120,94 @@ def login_user(
             detail="Invalid credentials"
         )
 
-    token = create_access_token(
-        {"sub": str(user.id)}
-    )
+    return _create_session(response, user)
 
+
+@router.get("/google/config", response_model=GoogleAuthConfigResponse)
+def google_auth_config(response: Response):
+    client_id = settings.GOOGLE_AUTH_CLIENT_ID
+    response.headers["Cache-Control"] = "no-store"
+    if not client_id:
+        return {"enabled": False, "client_id": None, "csrf_token": None}
+
+    csrf_token = secrets.token_urlsafe(32)
     response.set_cookie(
-        key=settings.SESSION_COOKIE_NAME,
-        value=token,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        key=settings.GOOGLE_AUTH_CSRF_COOKIE_NAME,
+        value=csrf_token,
+        max_age=settings.GOOGLE_AUTH_CSRF_MAX_AGE_SECONDS,
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite=settings.SESSION_COOKIE_SAMESITE,
+        samesite="lax",
         path="/",
     )
-
     return {
-        "access_token": token,
-        "token_type": "bearer"
+        "enabled": True,
+        "client_id": client_id,
+        "csrf_token": csrf_token,
     }
+
+
+@router.post("/google", response_model=TokenResponse)
+def login_with_google(
+    request: GoogleCredentialRequest,
+    response: Response,
+    csrf_cookie: str | None = Cookie(default=None, alias=settings.GOOGLE_AUTH_CSRF_COOKIE_NAME),
+    db: Session = Depends(get_db),
+):
+    if not settings.GOOGLE_AUTH_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    if not csrf_cookie or not secrets.compare_digest(csrf_cookie, request.csrf_token):
+        raise HTTPException(status_code=403, detail="Google sign-in session expired. Please try again")
+
+    try:
+        identity = verify_google_credential(request.credential)
+    except InvalidGoogleCredentialError as exc:
+        raise HTTPException(status_code=401, detail="Google could not verify this account") from exc
+    except GoogleIdentityUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Google sign-in is temporarily unavailable") from exc
+
+    user = db.query(User).filter(User.google_subject == identity.subject).first()
+    if user is None:
+        user = (
+            db.query(User)
+            .filter(func.lower(User.email) == identity.email)
+            .first()
+        )
+        if user is not None:
+            linked_subject = getattr(user, "google_subject", None)
+            if linked_subject and linked_subject != identity.subject:
+                raise HTTPException(status_code=409, detail="This email is linked to another Google account")
+            if not identity.google_is_authoritative_for_email:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Use email and password for this account. Automatic linking requires Gmail or Google Workspace",
+                )
+            user.google_subject = identity.subject
+        else:
+            user = User(
+                name=identity.name,
+                email=identity.email,
+                password_hash=None,
+                google_subject=identity.subject,
+            )
+            db.add(user)
+
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            user = db.query(User).filter(User.google_subject == identity.subject).first()
+            if user is None:
+                raise HTTPException(status_code=409, detail="This Google account could not be linked") from exc
+        db.refresh(user)
+
+    response.delete_cookie(
+        key=settings.GOOGLE_AUTH_CSRF_COOKIE_NAME,
+        path="/",
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite="lax",
+    )
+    return _create_session(response, user)
 
 
 @router.post("/logout")
@@ -209,7 +289,7 @@ async def update_my_profile_picture(
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded image is empty")
     if len(content) > MAX_PROFILE_PICTURE_BYTES:
-        raise HTTPException(status_code=413, detail="Profile pictures must be 5 MB or smaller")
+        raise HTTPException(status_code=413, detail="Profile pictures must be 4 MB or smaller")
     if not signature_check(content):
         raise HTTPException(status_code=400, detail="The uploaded file does not match its image type")
 
@@ -269,4 +349,23 @@ def _user_response(user: User) -> dict:
         "name": user.name,
         "email": user.email,
         "profile_picture_version": getattr(user, "profile_picture_version", None),
+        "has_password": bool(getattr(user, "password_hash", None)),
+        "google_connected": bool(getattr(user, "google_subject", None)),
+    }
+
+
+def _create_session(response: Response, user: User) -> dict:
+    token = create_access_token({"sub": str(user.id)})
+    response.set_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        value=token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        path="/",
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
     }

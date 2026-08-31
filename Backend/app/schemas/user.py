@@ -60,6 +60,17 @@ class TokenResponse(BaseModel):
     token_type: str
 
 
+class GoogleAuthConfigResponse(BaseModel):
+    enabled: bool
+    client_id: str | None = None
+    csrf_token: str | None = None
+
+
+class GoogleCredentialRequest(BaseModel):
+    credential: str = Field(min_length=100, max_length=8_192)
+    csrf_token: str = Field(min_length=32, max_length=256)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,3 +78,5 @@ class UserResponse(BaseModel):
     name: str
     email: EmailStr
     profile_picture_version: str | None = None
+    has_password: bool = True
+    google_connected: bool = False

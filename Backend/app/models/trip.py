@@ -7,6 +7,7 @@ from sqlalchemy import Integer
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 from sqlalchemy import Text
 
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -17,6 +18,9 @@ from app.core.database import Base
 
 class Trip(Base):
     __tablename__ = "trips"
+    __table_args__ = (
+        Index("ix_trips_user_updated", "user_id", "updated_at"),
+    )
 
     id = Column(
         UUID(as_uuid=True),

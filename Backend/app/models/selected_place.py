@@ -7,6 +7,7 @@ from sqlalchemy import Integer
 from sqlalchemy import Float
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -15,6 +16,9 @@ from app.core.database import Base
 
 class SelectedPlace(Base):
     __tablename__ = "selected_places"
+    __table_args__ = (
+        Index("ix_selected_places_trip", "trip_id"),
+    )
 
     id = Column(
         UUID(as_uuid=True),

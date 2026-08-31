@@ -1,7 +1,8 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// Stay below Vercel Functions' 4.5 MB response-payload ceiling.
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 // Wikimedia currently serves a fixed set of thumbnail buckets. 1280px is
 // accepted broadly; arbitrary widths such as 1600px return HTTP 400.
@@ -204,7 +205,7 @@ async function fetchImage(initialUrl: URL) {
       signal: AbortSignal.timeout(10_000),
       // Keep image bodies out of Next's incremental fetch cache. Large
       // Wikimedia originals can exceed that cache's per-entry limit even
-      // though they are safely below this proxy's own 10 MB limit.
+      // though they are safely below this proxy's own 4 MB limit.
       cache: "no-store",
     });
 

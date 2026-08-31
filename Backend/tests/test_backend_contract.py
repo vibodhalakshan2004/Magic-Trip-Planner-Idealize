@@ -229,9 +229,31 @@ def test_openapi_exposes_planner_restore_endpoints():
         "/auth/me",
         "/auth/me/password",
         "/auth/me/profile-picture",
+        "/auth/google/config",
+        "/auth/google",
     }
 
     assert expected_paths.issubset(schema["paths"].keys())
+
+
+def test_health_returns_service_unavailable_when_database_is_down():
+    class UnavailableDB:
+        def execute(self, statement):
+            raise RuntimeError("database unavailable")
+
+    def override_db():
+        yield UnavailableDB()
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = TestClient(app).get("/health")
+        assert response.status_code == 503
+        assert response.json() == {
+            "status": "degraded",
+            "database": "unavailable",
+        }
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def test_planner_restore_endpoints_return_saved_state():

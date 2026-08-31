@@ -12,7 +12,7 @@ import { Field, inputClass } from "@/components/ui/field";
 import * as authApi from "@/lib/api/auth";
 import { useAuthStore } from "@/lib/store/auth-store";
 
-const MAX_PROFILE_PICTURE_BYTES = 5 * 1024 * 1024;
+const MAX_PROFILE_PICTURE_BYTES = 4 * 1024 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 export default function ProfilePage() {
@@ -116,7 +116,7 @@ export default function ProfilePage() {
     }
     if (file.size > MAX_PROFILE_PICTURE_BYTES) {
       if (fileInput.current) fileInput.current.value = "";
-      return setError(new Error("Profile pictures must be 5 MB or smaller."));
+      return setError(new Error("Profile pictures must be 4 MB or smaller."));
     }
     setPicture(file);
   }
@@ -161,7 +161,7 @@ export default function ProfilePage() {
       <div>
         <p className="text-xs font-extrabold tracking-[0.15em] text-[#d56535]">YOUR ACCOUNT</p>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-4xl tracking-[-0.03em] text-[#123c32] sm:text-5xl">Profile and security.</h1>
-        <p className="mt-2 max-w-2xl text-[#60766f]">Keep your personal details, sign-in password, and profile picture up to date.</p>
+        <p className="mt-2 max-w-2xl text-[#60766f]">Keep your personal details, sign-in methods, and profile picture up to date.</p>
       </div>
 
       <div className="mt-7 grid gap-5 lg:grid-cols-[340px_1fr]">
@@ -189,7 +189,7 @@ export default function ProfilePage() {
                 className="block w-full text-xs text-[#c2d4cc] file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-white/15"
               />
             </label>
-            <p className="text-xs leading-5 text-[#9fb8ae]">JPEG, PNG, WebP, or GIF. Maximum 5 MB.</p>
+            <p className="text-xs leading-5 text-[#9fb8ae]">JPEG, PNG, WebP, or GIF. Maximum 4 MB.</p>
             <Button type="button" disabled={!picture || busy !== null} onClick={uploadPicture} className="w-full bg-[#e36f3d] hover:bg-[#cb5f31]">
               {busy === "picture" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Save picture
             </Button>
@@ -223,20 +223,29 @@ export default function ProfilePage() {
             </Button>
           </form>
 
-          <form onSubmit={savePassword} className="rounded-2xl border border-[#17453a]/10 bg-white p-5 shadow-[0_8px_30px_rgba(18,60,50,.04)] sm:p-7">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fdf0e8] text-[#b5532e]"><KeyRound className="h-5 w-5" /></span>
-              <div><h2 className="font-extrabold text-[#173e34]">Change password</h2><p className="text-sm text-[#60766f]">Confirm your current password before choosing a new one.</p></div>
-            </div>
-            <div className="mt-6 grid gap-5 md:grid-cols-3">
-              <Field label="Current password"><input className={inputClass} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required /></Field>
-              <Field label="New password"><input className={inputClass} type="password" minLength={8} maxLength={72} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" required /></Field>
-              <Field label="Confirm new password"><input className={inputClass} type="password" minLength={8} maxLength={72} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" required /></Field>
-            </div>
-            <Button type="submit" className="mt-6" disabled={busy !== null || !currentPassword || !newPassword || !confirmPassword}>
-              {busy === "password" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Update password
-            </Button>
-          </form>
+          {user.has_password ? (
+            <form onSubmit={savePassword} className="rounded-2xl border border-[#17453a]/10 bg-white p-5 shadow-[0_8px_30px_rgba(18,60,50,.04)] sm:p-7">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fdf0e8] text-[#b5532e]"><KeyRound className="h-5 w-5" /></span>
+                <div><h2 className="font-extrabold text-[#173e34]">Change password</h2><p className="text-sm text-[#60766f]">Confirm your current password before choosing a new one.</p></div>
+              </div>
+              <div className="mt-6 grid gap-5 md:grid-cols-3">
+                <Field label="Current password"><input className={inputClass} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required /></Field>
+                <Field label="New password"><input className={inputClass} type="password" minLength={8} maxLength={72} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" required /></Field>
+                <Field label="Confirm new password"><input className={inputClass} type="password" minLength={8} maxLength={72} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" required /></Field>
+              </div>
+              <Button type="submit" className="mt-6" disabled={busy !== null || !currentPassword || !newPassword || !confirmPassword}>
+                {busy === "password" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Update password
+              </Button>
+            </form>
+          ) : (
+            <section className="rounded-2xl border border-[#17453a]/10 bg-white p-5 shadow-[0_8px_30px_rgba(18,60,50,.04)] sm:p-7">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e6efe9] text-[#17453a]"><KeyRound className="h-5 w-5" /></span>
+                <div><h2 className="font-extrabold text-[#173e34]">Google sign-in</h2><p className="text-sm text-[#60766f]">This account does not have a password. Continue with the same Google account whenever you sign in.</p></div>
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </AppShell>

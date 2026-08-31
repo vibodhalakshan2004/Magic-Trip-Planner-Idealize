@@ -8,6 +8,12 @@ import { useAuthStore } from "@/lib/store/auth-store";
 import { usePlannerStore } from "@/lib/store/planner-store";
 import * as authApi from "@/lib/api/auth";
 
+const protectedRoutePrefixes = ["/dashboard", "/planner", "/profile", "/reviews"];
+
+function isProtectedRoute(pathname: string) {
+  return protectedRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -21,7 +27,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         logout();
         usePlannerStore.getState().reset();
         queryClient.clear();
-        if (pathname !== "/login" && pathname !== "/register") router.replace("/login");
+        if (isProtectedRoute(pathname)) router.replace("/login");
       },
     }),
     [logout, pathname, queryClient, router],

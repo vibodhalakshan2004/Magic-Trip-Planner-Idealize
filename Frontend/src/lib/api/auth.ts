@@ -1,5 +1,5 @@
 import { json, request, requestBlob } from "./client";
-import type { TokenResponse, User } from "./types";
+import type { GoogleAuthConfig, TokenResponse, User } from "./types";
 
 export const register = (body: { name: string; email: string; password: string }) =>
   json<{ message: string; user_id: string }>("/auth/register", "POST", body);
@@ -14,6 +14,10 @@ export async function login(email: string, password: string) {
     body: form,
   });
 }
+
+export const googleAuthConfig = () => request<GoogleAuthConfig>("/auth/google/config");
+export const loginWithGoogle = (credential: string, csrfToken: string) =>
+  json<TokenResponse>("/auth/google", "POST", { credential, csrf_token: csrfToken });
 
 export const me = () => request<User>("/auth/me");
 export const logout = () => request<{ message: string }>("/auth/logout", { method: "POST" });

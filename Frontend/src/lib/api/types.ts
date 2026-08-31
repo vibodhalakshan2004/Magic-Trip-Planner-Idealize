@@ -1,5 +1,13 @@
-export type User = { id: string; name: string; email: string; profile_picture_version?: string | null };
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  profile_picture_version?: string | null;
+  has_password: boolean;
+  google_connected: boolean;
+};
 export type TokenResponse = { access_token: string; token_type: string };
+export type GoogleAuthConfig = { enabled: boolean; client_id: string | null; csrf_token: string | null };
 export type Health = { status: string; database: string };
 
 export type Preference = {
