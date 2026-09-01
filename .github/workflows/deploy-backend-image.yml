@@ -1,0 +1,33 @@
+name: Build backend image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Container image tag
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_ACR_PUSH_CREDENTIALS }}
+
+      - name: Sign in to container registry
+        run: az acr login --name magictrip72450
+
+      - name: Build and push backend image
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          docker build --tag "magictrip72450.azurecr.io/magictrip-backend:${IMAGE_TAG}" Backend
+          docker push "magictrip72450.azurecr.io/magictrip-backend:${IMAGE_TAG}"
