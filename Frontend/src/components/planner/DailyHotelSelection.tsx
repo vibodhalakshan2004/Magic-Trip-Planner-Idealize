@@ -126,7 +126,7 @@ export function DailyHotelSelection({
                   {hotel.rating_estimate ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">{hotel.rating_estimate.toFixed(1)}</span> : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-500">{hotel.short_description || "Accommodation near this day's route endpoint."}</p>
-                <p className="mt-2 text-xs font-bold text-sky-700">Open map data · price and availability must be confirmed</p>
+                <p className="mt-2 text-xs font-bold text-sky-700">Verified accommodation listing · price and availability must be confirmed</p>
                 <div className="mt-3 grid gap-1 text-xs font-bold text-slate-600">
                   <span>{hotel.area || hotel.distance_summary || "Near selected route area"}</span>
                   <span>{hotel.transfer_distance_km ?? 0} km transfer - {minutes(hotel.transfer_time_minutes)}</span>

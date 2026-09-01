@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CalendarDays, CheckCircle2, Gauge, Luggage, Printer, Share2, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, Building2, CalendarDays, CheckCircle2, ExternalLink, Gauge, Luggage, MapPin, Printer, Share2, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TravelerToolkit } from "@/components/planner/TravelerToolkit";
 import type { Budget, Hotel, Place, RoutePlan, Trip } from "@/lib/api/types";
@@ -90,6 +90,7 @@ export function FinalTripSummary({ trip, places, hotels, route, budget }: { trip
         <SummaryCard title="Hotels" value={hotels.length} lines={hotels.map((h) => h.name)} />
         <SummaryCard title="Route" value={`${route?.total_distance_km ?? 0} km`} lines={[minutes(route?.total_travel_time_minutes), route?.map_provider || "Map provider pending"]} />
       </div>
+      <SelectedHotelsSummary hotels={hotels} trip={trip} />
       {budget ? <BudgetSummaryCards budget={budget} /> : <p className="rounded-md bg-slate-100 p-4 text-sm text-slate-600">Calculate budget to complete the final summary.</p>}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white p-5">
@@ -109,6 +110,53 @@ export function FinalTripSummary({ trip, places, hotels, route, budget }: { trip
       {trip ? <TravelerToolkit trip={trip} places={places} hotels={hotels} route={route} budget={budget} /> : null}
     </div>
   );
+}
+
+function SelectedHotelsSummary({ hotels, trip }: { hotels: Hotel[]; trip: Trip | null }) {
+  const sortedHotels = [...hotels].sort((a, b) => (a.day_number ?? 999) - (b.day_number ?? 999));
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-5">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="font-black text-slate-950"><Building2 className="mr-2 inline h-4 w-4 text-emerald-700" />Selected hotels</h3>
+          <p className="mt-1 text-sm text-slate-500">Review every overnight stay before exporting or sharing the trip.</p>
+        </div>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-800">{hotels.length} selected</span>
+      </div>
+      {sortedHotels.length ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {sortedHotels.map((hotel, index) => (
+            <article key={`${hotel.day_number ?? index}-${hotel.hotel_key}`} className="rounded-md border border-slate-200 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-wide text-emerald-700">{hotel.day_number ? `Night after day ${hotel.day_number}` : "Trip accommodation"}</p>
+                  <h4 className="mt-1 truncate text-lg font-black text-slate-950">{hotel.name}</h4>
+                </div>
+                <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{hotel.hotel_type.replaceAll("_", " ")}</span>
+              </div>
+              <div className="mt-3 grid gap-1 text-sm text-slate-600">
+                <span><MapPin className="mr-1 inline h-3.5 w-3.5" />{hotel.area || hotel.distance_summary || "Near the planned route"}</span>
+                <span>{hotel.nights || 1} night{(hotel.nights || 1) === 1 ? "" : "s"} · {hotel.rooms || 1} room{(hotel.rooms || 1) === 1 ? "" : "s"}</span>
+                {hotel.check_in_date || hotel.check_out_date ? <span>{hotel.check_in_date || "Check-in pending"} to {hotel.check_out_date || "Check-out pending"}</span> : null}
+                {hotel.transfer_distance_km ? <span>{hotel.transfer_distance_km} km from the day endpoint · {minutes(hotel.transfer_time_minutes)}</span> : null}
+                {hotel.total_estimated_price_lkr ? <span className="font-bold text-slate-900">Estimated stay: {money(hotel.total_estimated_price_lkr)}</span> : <span>Price must be confirmed with the property.</span>}
+              </div>
+              <a className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700 underline" href={hotelMapsUrl(hotel, trip)} target="_blank" rel="noreferrer">Verify on Google Maps <ExternalLink className="h-3.5 w-3.5" /></a>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">No hotels are selected. Return to the daily hotel steps to add overnight stays, or mark the final day as going directly home.</p>
+      )}
+    </section>
+  );
+}
+
+function hotelMapsUrl(hotel: Hotel, trip: Trip | null) {
+  const query = hotel.latitude != null && hotel.longitude != null
+    ? `${hotel.latitude},${hotel.longitude}`
+    : `${hotel.name}, ${hotel.area || trip?.destination || "Sri Lanka"}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function packingSuggestions(places: Place[]) {

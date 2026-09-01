@@ -69,7 +69,14 @@ class GoogleMapsService:
             "place_id": item.get("place_id"),
         }
 
-    def search_places(self, text_query: str, limit: int = 5) -> list[dict]:
+    def search_places(
+        self,
+        text_query: str,
+        limit: int = 5,
+        *,
+        included_type: str | None = None,
+        strict_type_filtering: bool = False,
+    ) -> list[dict]:
         if not self.enabled("places") or not text_query.strip():
             return []
 
@@ -84,21 +91,29 @@ class GoogleMapsService:
                 "places.googleMapsUri",
             ]
         )
+        request_body: dict[str, Any] = {
+            "textQuery": text_query,
+            "pageSize": max(1, min(limit, 10)),
+            "languageCode": "en",
+            "regionCode": "LK",
+        }
+        if included_type:
+            request_body["includedType"] = included_type
+            request_body["strictTypeFiltering"] = strict_type_filtering
+
         data = map_http_client.post_json(
             self.PLACES_TEXT_SEARCH_URL,
-            json_body={
-                "textQuery": text_query,
-                "pageSize": max(1, min(limit, 10)),
-                "languageCode": "en",
-                "regionCode": "LK",
-            },
+            json_body=request_body,
             headers={
                 "Content-Type": "application/json",
                 "X-Goog-Api-Key": settings.GOOGLE_API_KEY or "",
                 "X-Goog-FieldMask": field_mask,
             },
             timeout=20,
-            cache_key=f"google-places:{self._digest(text_query.lower())}:{limit}",
+            cache_key=(
+                f"google-places:{self._digest(text_query.lower())}:{limit}:"
+                f"{included_type or 'any'}:{int(strict_type_filtering)}"
+            ),
             context="Google Places text search",
             before_request=lambda: google_quota_guard.reserve("places_search"),
         )
