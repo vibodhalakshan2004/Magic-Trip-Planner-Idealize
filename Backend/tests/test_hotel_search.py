@@ -5,7 +5,9 @@ from uuid import uuid4
 import pytest
 
 from app.agents.destination_agent import DestinationAgent
+from app.agents.hotel_agent import HotelAgent
 from app.api.routes.hotels import _haversine_distance_km
+from app.schemas.hotel import HotelAgentResponse, HotelRecommendation
 from app.services.google_maps import google_maps_service
 from app.services.hotel_search import HotelSearchService
 from app.services.map_http import map_http_client
@@ -84,6 +86,30 @@ def test_google_hotel_search_requests_and_keeps_only_lodging(monkeypatch):
     assert captured["included_type"] == "lodging"
     assert captured["strict_type_filtering"] is True
     assert [item["name"] for item in suggestions] == ["Verified Kandy Hotel"]
+    assert suggestions[0]["image_url"] is None
+
+
+def test_hotel_agent_does_not_attach_ambiguous_open_web_images():
+    result = HotelAgentResponse(
+        trip_id=uuid4(),
+        destination="Ella",
+        nights=1,
+        rooms=1,
+        summary="A verified accommodation option.",
+        recommended_hotels=[
+            HotelRecommendation(
+                name="Villa",
+                area="Ella",
+                image_url="https://example.com/david-villa.jpg",
+                reason_for_recommendation="Near the selected route.",
+            )
+        ],
+    )
+
+    enriched = HotelAgent()._enrich_hotels(SimpleNamespace(destination="Ella"), result)
+
+    assert enriched.recommended_hotels[0].image_url is None
+    assert enriched.recommended_hotels[0].short_description == "Ella Near the selected route."
 
 
 def test_osm_hotel_search_discards_non_accommodation_results(monkeypatch):

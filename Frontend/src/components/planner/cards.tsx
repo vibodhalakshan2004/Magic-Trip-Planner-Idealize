@@ -15,7 +15,11 @@ export function SmartImage({ src, alt, kind, fallbackQuery, className = "h-48 w-
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const imageSrc = useMemo(() => {
     const sourceKey = src ?? `lookup:${alt}`;
-    if (failedSrc === sourceKey) return fallbackImage(alt, kind);
+    // Hotel names are often ambiguous (for example, "Villa" can match a
+    // person's name). Never use the generic Wikimedia search for hotel
+    // imagery; show a neutral placeholder unless the hotel provider supplied
+    // a property-linked image URL.
+    if (failedSrc === sourceKey || (kind === "hotel" && !src)) return fallbackImage(alt, kind);
     const representativeQuery = fallbackQuery?.trim() || (kind === "hotel" ? "Sri Lanka architecture" : "Sri Lanka landscape");
     const sharedParams = `label=${encodeURIComponent(alt)}&fallbackQuery=${encodeURIComponent(representativeQuery)}&v=${IMAGE_PROXY_VERSION}`;
     if (src) return `/api/image?url=${encodeURIComponent(src)}&${sharedParams}`;
