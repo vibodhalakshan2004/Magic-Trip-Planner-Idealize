@@ -119,20 +119,21 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
     const routeConfirmed = store.routePlan?.route_status === "confirmed";
     
     const baseSteps = [
-      { id: "preferences", label: "Preferences", complete: false },
+      { id: "preferences", label: "Preferences", complete: false, optional: true },
       { id: "trip", label: "Trip setup", complete: hasTrip },
-      { id: "places", label: "Destination ideas", complete: store.suggestedPlaces.length > 0, disabled: !hasTrip, reason: !hasTrip ? "Create trip first" : undefined },
+      { id: "places", label: "Destination ideas", complete: store.suggestedPlaces.length > 0 || hasPlaces, disabled: !hasTrip, reason: !hasTrip ? "Create trip first" : undefined },
       { id: "place-select", label: "Place selection", complete: hasPlaces, disabled: !hasTrip, reason: !hasTrip ? "Create trip first" : undefined },
       { id: "route", label: "Route map", complete: !!store.routePlan, disabled: !hasPlaces, reason: !hasPlaces ? "Select places first" : store.stale.route ? "Regenerate route" : undefined },
     ];
 
     const daySteps = [];
     if (routeConfirmed && store.routePlan) {
+      const lastDayNumber = store.routePlan.days.at(-1)?.day_number;
       for (const day of store.routePlan.days) {
         daySteps.push({
           id: `day-${day.day_number}`,
           label: `Day ${day.day_number}`,
-          complete: store.selectedHotels.some(h => h.day_number === day.day_number),
+          complete: store.selectedHotels.some(h => h.day_number === day.day_number) || (day.day_number === lastDayNumber && !!store.budget),
           disabled: false,
         });
       }
