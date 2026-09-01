@@ -1,10 +1,11 @@
 import { Check, ChevronRight, Lock } from "lucide-react";
 import { cn } from "@/lib/utils/format";
 
-export type PlannerStep = { id: string; label: string; reason?: string; complete?: boolean; disabled?: boolean };
+export type PlannerStep = { id: string; label: string; reason?: string; complete?: boolean; disabled?: boolean; optional?: boolean };
 
 export function PlannerStepper({ steps, active, onSelect }: { steps: readonly PlannerStep[]; active: string; onSelect: (id: string) => void }) {
-  const completed = steps.filter((step) => step.complete).length;
+  const requiredSteps = steps.filter((step) => !step.optional);
+  const completed = requiredSteps.filter((step) => step.complete).length;
   const currentIndex = Math.max(steps.findIndex((step) => step.id === active), 0);
 
   return (
@@ -14,7 +15,7 @@ export function PlannerStepper({ steps, active, onSelect }: { steps: readonly Pl
           <p className="text-xs font-extrabold tracking-[0.13em] text-[#789087]">TRIP PROGRESS</p>
           <p className="mt-1 text-sm font-bold text-[#173e34]">Step {currentIndex + 1} of {steps.length}</p>
         </div>
-        <span className="text-xs font-bold text-[#60766f]">{completed} complete</span>
+        <span className="text-xs font-bold text-[#60766f]">{completed}/{requiredSteps.length} required</span>
       </div>
       <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-[#dfe7e1]">
         <div className="h-full rounded-full bg-[#d56535] transition-all" style={{ width: `${Math.max(((currentIndex + 1) / steps.length) * 100, 4)}%` }} />
@@ -44,7 +45,7 @@ export function PlannerStepper({ steps, active, onSelect }: { steps: readonly Pl
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-bold">{step.label}</span>
-                {step.reason ? <span className="mt-0.5 block truncate text-[11px] text-[#789087]">{step.reason}</span> : null}
+                {step.optional ? <span className="mt-0.5 block truncate text-[11px] text-[#789087]">Optional</span> : step.reason ? <span className="mt-0.5 block truncate text-[11px] text-[#789087]">{step.reason}</span> : null}
               </span>
               {!step.disabled ? <ChevronRight className="hidden h-4 w-4 shrink-0 text-[#9cafA7] lg:block" /> : null}
             </button>
