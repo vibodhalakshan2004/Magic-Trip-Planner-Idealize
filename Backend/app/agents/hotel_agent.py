@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from app.agents.gemini_client import client
 from app.core.config import settings
 from app.schemas.hotel import HotelAgentResponse, HotelSuggestRequest
-from app.services.media_lookup import MediaLookupService
 
 
 GEMINI_HOTEL_RESPONSE_SCHEMA = {
@@ -83,10 +82,6 @@ GEMINI_HOTEL_RESPONSE_SCHEMA = {
 
 
 class HotelAgent:
-
-    def __init__(self):
-        self.media_lookup = MediaLookupService()
-
     def _make_key(self, name: str) -> str:
         key = name.lower().strip()
         key = re.sub(r"[^a-z0-9]+", "_", key)
@@ -157,13 +152,14 @@ class HotelAgent:
             if not hotel.search_query:
                 hotel.search_query = f"{hotel.name} {trip.destination} Sri Lanka"
 
-            media = self.media_lookup.lookup_media(hotel.search_query)
-
             if not hotel.short_description:
-                hotel.short_description = media.get("description") or self._compose_short_description(hotel)
+                hotel.short_description = self._compose_short_description(hotel)
 
-            if not hotel.image_url:
-                hotel.image_url = media.get("image_url")
+            # Hotel names are frequently ambiguous, so an open-web media
+            # search can associate a property with an unrelated person or
+            # place. Agent-generated hotels do not have a provider-linked
+            # photo; let the UI use its safe accommodation placeholder.
+            hotel.image_url = None
 
         return result
 

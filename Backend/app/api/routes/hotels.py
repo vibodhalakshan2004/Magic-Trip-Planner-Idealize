@@ -30,7 +30,6 @@ from app.schemas.hotel import (
 from app.schemas.preference import PreferenceResponse
 from app.services.geocoder import GeocoderService
 from app.services.hotel_search import HotelSearchService
-from app.services.media_lookup import MediaLookupService
 from app.services.transport_cost import estimate_segment_transport_cost
 from app.services.trip_access import require_trip_access
 
@@ -40,7 +39,6 @@ router = APIRouter(
 )
 
 geocoder_service = GeocoderService()
-media_lookup_service = MediaLookupService()
 
 
 def _saved_preference_prompt(preference: Preference) -> dict:
@@ -383,19 +381,6 @@ def select_hotels_for_trip(
                 if geocoded:
                     latitude = geocoded.get("latitude")
                     longitude = geocoded.get("longitude")
-                    break
-
-        if not image_url or not short_description:
-            for query in _hotel_queries(hotel, trip):
-                media = media_lookup_service.lookup_media(query)
-
-                if not short_description and media.get("description"):
-                    short_description = media.get("description")
-
-                if not image_url and media.get("image_url"):
-                    image_url = media.get("image_url")
-
-                if short_description and image_url:
                     break
 
         if not short_description:
