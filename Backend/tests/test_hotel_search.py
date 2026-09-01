@@ -53,6 +53,97 @@ def test_nearby_hotel_search_is_bounded_and_stops_after_results(monkeypatch):
     assert suggestions[0]["image_url"].endswith("Test%20Hotel.jpg")
 
 
+def test_google_hotel_search_requests_and_keeps_only_lodging(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(google_maps_service, "enabled", lambda feature: feature == "places")
+
+    def fake_search(query, limit, **kwargs):
+        captured.update({"query": query, "limit": limit, **kwargs})
+        return [
+            {
+                "id": "real-hotel",
+                "displayName": {"text": "Verified Kandy Hotel"},
+                "formattedAddress": "Kandy, Sri Lanka",
+                "location": {"latitude": 7.29, "longitude": 80.63},
+                "primaryType": "hotel",
+                "types": ["hotel", "lodging"],
+            },
+            {
+                "id": "not-a-hotel",
+                "displayName": {"text": "Kandy Railway Station"},
+                "formattedAddress": "Kandy, Sri Lanka",
+                "location": {"latitude": 7.29, "longitude": 80.63},
+                "primaryType": "train_station",
+                "types": ["train_station", "transit_station"],
+            },
+        ]
+
+    monkeypatch.setattr(google_maps_service, "search_places", fake_search)
+    suggestions = HotelSearchService().search_hotels("hotel", "Kandy", limit=5)
+
+    assert captured["included_type"] == "lodging"
+    assert captured["strict_type_filtering"] is True
+    assert [item["name"] for item in suggestions] == ["Verified Kandy Hotel"]
+
+
+def test_osm_hotel_search_discards_non_accommodation_results(monkeypatch):
+    monkeypatch.setattr(google_maps_service, "enabled", lambda feature: False)
+    monkeypatch.setattr(
+        map_http_client,
+        "get_json",
+        lambda *args, **kwargs: [
+            {
+                "osm_type": "node",
+                "osm_id": 1,
+                "display_name": "Hotel Road, Kandy, Sri Lanka",
+                "lat": "7.29",
+                "lon": "80.63",
+                "type": "residential",
+                "class": "highway",
+                "address": {"road": "Hotel Road", "city": "Kandy"},
+            },
+            {
+                "osm_type": "node",
+                "osm_id": 2,
+                "display_name": "Real Guest House, Kandy, Sri Lanka",
+                "lat": "7.30",
+                "lon": "80.64",
+                "type": "guest_house",
+                "class": "tourism",
+                "address": {"tourism": "Real Guest House", "city": "Kandy"},
+            },
+        ],
+    )
+
+    suggestions = HotelSearchService().search_hotels("hotel", "Kandy", limit=5)
+
+    assert [item["name"] for item in suggestions] == ["Real Guest House"]
+
+
+def test_osm_hotel_search_does_not_use_generic_hotel_as_the_name(monkeypatch):
+    monkeypatch.setattr(google_maps_service, "enabled", lambda feature: False)
+    monkeypatch.setattr(
+        map_http_client,
+        "get_json",
+        lambda *args, **kwargs: [
+            {
+                "osm_type": "node",
+                "osm_id": 3,
+                "display_name": "Devon Hotel, Kandy, Sri Lanka",
+                "lat": "7.29",
+                "lon": "80.63",
+                "type": "hotel",
+                "class": "tourism",
+                "address": {"tourism": "Hotel", "city": "Kandy"},
+            }
+        ],
+    )
+
+    suggestions = HotelSearchService().search_hotels("hotel", "Kandy", limit=5)
+
+    assert suggestions[0]["name"] == "Devon Hotel"
+
+
 def test_place_media_lookup_still_runs_when_geocoding_fails(monkeypatch):
     trip = SimpleNamespace(
         id=uuid4(),

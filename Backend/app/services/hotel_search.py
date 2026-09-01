@@ -12,6 +12,29 @@ class HotelSearchService:
         "upload.wikimedia.org",
         "commons.wikimedia.org",
     }
+    GOOGLE_LODGING_TYPES = {
+        "bed_and_breakfast",
+        "cottage",
+        "extended_stay_hotel",
+        "farmstay",
+        "guest_house",
+        "hostel",
+        "hotel",
+        "inn",
+        "lodging",
+        "motel",
+        "private_guest_room",
+        "resort_hotel",
+    }
+    OSM_LODGING_TYPES = {
+        "apartment",
+        "guest_house",
+        "guesthouse",
+        "hostel",
+        "hotel",
+        "motel",
+        "resort",
+    }
 
     def search_hotels(
         self,
@@ -26,9 +49,20 @@ class HotelSearchService:
         google_query = f"{query}, {destination}, {country}"
         if google_maps_service.enabled("places"):
             try:
-                google_results = google_maps_service.search_places(google_query, limit)
-                if google_results:
-                    return [self._google_suggestion(item, destination) for item in google_results]
+                google_results = google_maps_service.search_places(
+                    google_query,
+                    limit,
+                    included_type="lodging",
+                    strict_type_filtering=True,
+                )
+                verified_results = [
+                    item for item in google_results if self._is_google_lodging(item)
+                ]
+                if verified_results:
+                    return [
+                        self._google_suggestion(item, destination)
+                        for item in verified_results
+                    ]
             except Exception:
                 pass
 
@@ -79,6 +113,9 @@ class HotelSearchService:
                 continue
 
             for item in search_results:
+                if not self._is_osm_lodging(item):
+                    continue
+
                 osm_key = (
                     item.get("osm_type"),
                     item.get("osm_id"),
@@ -129,6 +166,23 @@ class HotelSearchService:
             )
 
         return suggestions
+
+    def _is_google_lodging(self, item: dict) -> bool:
+        types = set(item.get("types") or [])
+        if item.get("primaryType"):
+            types.add(item["primaryType"])
+        return bool(types & self.GOOGLE_LODGING_TYPES)
+
+    def _is_osm_lodging(self, item: dict) -> bool:
+        place_type = str(item.get("type") or "").lower()
+        category = str(item.get("category") or item.get("class") or "").lower()
+        tags = item.get("extratags") or {}
+        tourism = str(tags.get("tourism") or "").lower()
+        return (
+            place_type in self.OSM_LODGING_TYPES
+            or tourism in self.OSM_LODGING_TYPES
+            or (category == "tourism" and place_type in self.OSM_LODGING_TYPES)
+        )
 
     def _google_suggestion(self, item: dict, destination: str) -> dict:
         name = (item.get("displayName") or {}).get("text") or "Accommodation"
@@ -240,6 +294,20 @@ class HotelSearchService:
         return cleaned if len(cleaned) <= 180 else cleaned[:177].rsplit(" ", 1)[0] + "..."
 
     def _extract_name(self, item: dict, fallback: str) -> str:
+        namedetails = item.get("namedetails") or {}
+        for key in ["name:en", "name"]:
+            value = str(namedetails.get(key) or "").strip()
+            if self._is_specific_name(value):
+                return value
+
+        direct_name = str(item.get("name") or "").strip()
+        if self._is_specific_name(direct_name):
+            return direct_name
+
+        display_name = str(item.get("display_name") or "").split(",", 1)[0].strip()
+        if self._is_specific_name(display_name):
+            return display_name
+
         address = item.get("address") or {}
 
         for key in [
@@ -249,15 +317,24 @@ class HotelSearchService:
             "shop",
             "road",
         ]:
-            if address.get(key):
-                return address[key]
-
-        display_name = item.get("display_name")
-
-        if display_name:
-            return display_name.split(",")[0].strip()
+            value = str(address.get(key) or "").strip()
+            if self._is_specific_name(value):
+                return value
 
         return fallback.strip()
+
+    def _is_specific_name(self, value: str) -> bool:
+        return value.lower() not in {
+            "",
+            "accommodation",
+            "guest house",
+            "guest_house",
+            "hostel",
+            "hotel",
+            "lodging",
+            "motel",
+            "resort",
+        }
 
     def _extract_area(self, item: dict) -> str | None:
         address = item.get("address") or {}

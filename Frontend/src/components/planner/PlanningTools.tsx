@@ -4,6 +4,7 @@ import { History, Loader2, RotateCcw, Sparkles, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
+import { ApiError } from "@/lib/api/client";
 import * as planningApi from "@/lib/api/planning";
 import type { PlanningJob, TripVersion } from "@/lib/api/types";
 
@@ -21,7 +22,11 @@ export function AutoPlanner({ tripId, onComplete, onError }: { tripId: string; o
     let mounted = true;
     planningApi.getLatestJob(tripId).then((latest) => {
       if (mounted) setJob(latest);
-    }).catch(onError).finally(() => {
+    }).catch((error) => {
+      // A planning job is optional. Older/manual trips can legitimately have
+      // no job record, so that 404 must not obscure a valid saved itinerary.
+      if (!(error instanceof ApiError && error.status === 404)) onError(error);
+    }).finally(() => {
       if (mounted) setLoadingLatest(false);
     });
     return () => { mounted = false; };

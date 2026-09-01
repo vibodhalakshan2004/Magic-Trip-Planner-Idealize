@@ -188,7 +188,7 @@ export function PlannerWorkspace({ tripId }: { tripId?: string }) {
       {toast ? <div role="status" className="mb-4 rounded-xl border border-[#b9d7c5] bg-[#e9f4ed] p-3.5 text-sm font-bold text-[#19503f]">{toast}</div> : null}
       {store.trip ? <div className="mb-5 grid gap-3"><AutoPlanner tripId={store.trip.id} onComplete={async () => { await restore(store.trip!.id); setToast("Your complete plan is ready"); }} onError={setError} /><div className="grid gap-3 xl:grid-cols-2"><VersionHistory tripId={store.trip.id} onRestored={async () => { await restore(store.trip!.id); setToast("Trip version restored"); }} onError={setError} /><ShareTrip tripId={store.trip.id} onError={setError} /></div></div> : null}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-        <PlannerStepper steps={steps} active={active} onSelect={(id) => setActive(id as StepId)} />
+        <PlannerStepper steps={steps} active={active} onSelect={(id) => { setError(undefined); setActive(id as StepId); }} />
         <div className="grid min-w-0 gap-4">
           <ApiErrorAlert error={error} onRetry={() => setError(undefined)} />
           {busy && busy !== "restore" ? <LoadingState title={busy === "save-places" ? "Saving selected places" : "Working on this step"} description="This can take a moment while the planner updates saved trip data." /> : null}

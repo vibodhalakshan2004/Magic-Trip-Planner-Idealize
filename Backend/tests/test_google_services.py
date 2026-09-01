@@ -81,6 +81,30 @@ def test_google_daily_weather_parser_uses_one_guarded_request(monkeypatch):
     assert "Thunderstorm" in forecast[date(2026, 7, 22)]["conditions"]
 
 
+def test_google_place_search_applies_strict_type_filter_without_extra_request(monkeypatch):
+    service = GoogleMapsService()
+    monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test-only-key")
+    monkeypatch.setattr(settings, "GOOGLE_PLACES_ENABLED", True)
+    calls = []
+
+    def fake_post_json(*args, **kwargs):
+        calls.append(kwargs)
+        return {"places": [{"id": "hotel-1", "types": ["hotel", "lodging"]}]}
+
+    monkeypatch.setattr(map_http_client, "post_json", fake_post_json)
+    results = service.search_places(
+        "hotels in Kandy",
+        5,
+        included_type="lodging",
+        strict_type_filtering=True,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["json_body"]["includedType"] == "lodging"
+    assert calls[0]["json_body"]["strictTypeFiltering"] is True
+    assert results[0]["id"] == "hotel-1"
+
+
 def test_google_route_parser_returns_existing_route_contract(monkeypatch):
     service = GoogleMapsService()
     monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test-only-key")
